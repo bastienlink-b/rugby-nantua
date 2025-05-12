@@ -1,0 +1,13 @@
+{
+  "name": "favicon-generator",
+  "version": "1.0.0",
+  "description": "Simple favicon generator script",
+  "main": "generate-favicons.js",
+  "scripts": {
+    "generate": "node generate-favicons.js"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2"
+  },
+  "private": true
+}
