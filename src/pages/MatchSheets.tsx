@@ -5,7 +5,7 @@ import {
   Plus, Search, FileText, Check, ArrowLeft, Download, ChevronDown, ChevronUp, X, User, Award, Loader, Edit
 } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
-import { getPdf, createPdfBlobUrl } from '../services/PdfStorage';
+import { getPdf, createPdfBlobUrl } from './PdfStorage';
 import { generateAndDownloadMatchSheet } from '../services/PdfExportService';
 
 const MatchSheets: React.FC = () => {
@@ -316,49 +316,68 @@ const MatchSheets: React.FC = () => {
                             {sheet.createdAt.toLocaleDateString()}
                           </p>
                           
-                          <div className="flex flex-wrap space-x-2">
+                          {/* Améliorations UI des boutons d'actions */}
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Aperçu */}
                             <button
-                              className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md flex items-center mb-1"
-                              onClick={() => handlePreviewMatchSheet(sheet)}
+                              className="w-full text-sm bg-blue-100 text-blue-700 px-3 py-2 rounded-md flex items-center justify-center hover:bg-blue-200 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePreviewMatchSheet(sheet);
+                              }}
+                              disabled={isGenerating === sheet.id}
                             >
-                              <FileText size={14} className="mr-1" /> Aperçu
+                              {isGenerating === sheet.id ? (
+                                <Loader size={14} className="mr-1.5 animate-spin" />
+                              ) : (
+                                <FileText size={14} className="mr-1.5" />
+                              )}
+                              Aperçu
                             </button>
-                            {isGenerating === sheet.id ? (
-                              <button
-                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75 mb-1"
-                                disabled
-                              >
-                                <Loader size={14} className="mr-1 animate-spin" /> Génération...
-                              </button>
-                            ) : (
-                              <button
-                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center hover:bg-green-200 mb-1"
-                                onClick={() => handleDownloadMatchSheet(sheet)}
-                              >
-                                <Download size={14} className="mr-1" /> Télécharger
-                              </button>
-                            )}
-                            <Link 
-                              to={`/match-sheets/create?id=${sheet.id}`} 
-                              className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded-md flex items-center hover:bg-indigo-200 mb-1"
+                            
+                            {/* Télécharger */}
+                            <button
+                              className="w-full text-sm bg-green-100 text-green-700 px-3 py-2 rounded-md flex items-center justify-center hover:bg-green-200 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadMatchSheet(sheet);
+                              }}
+                              disabled={isGenerating === sheet.id}
                             >
-                              <Edit size={14} className="mr-1" /> Éditer
+                              {isGenerating === sheet.id ? (
+                                <Loader size={14} className="mr-1.5 animate-spin" />
+                              ) : (
+                                <Download size={14} className="mr-1.5" />
+                              )}
+                              Télécharger
+                            </button>
+                            
+                            {/* Éditer */}
+                            <Link 
+                              to={`/match-sheets/edit/${sheet.id}`}
+                              className="w-full text-sm bg-indigo-100 text-indigo-700 px-3 py-2 rounded-md flex items-center justify-center hover:bg-indigo-200 transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Edit size={14} className="mr-1.5" />
+                              Éditer
                             </Link>
-                            {isDeleting === sheet.id ? (
-                              <button
-                                className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75 mb-1"
-                                disabled
-                              >
-                                <Loader size={14} className="mr-1 animate-spin" /> Suppression...
-                              </button>
-                            ) : (
-                              <button
-                                className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md flex items-center hover:bg-red-200 mb-1"
-                                onClick={() => handleDeleteMatchSheet(sheet.id, tournament?.location || 'Inconnu')}
-                              >
-                                <X size={14} className="mr-1" /> Supprimer
-                              </button>
-                            )}
+                            
+                            {/* Supprimer */}
+                            <button
+                              className="w-full text-sm bg-red-100 text-red-700 px-3 py-2 rounded-md flex items-center justify-center hover:bg-red-200 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMatchSheet(sheet.id, tournament?.location || 'Inconnu');
+                              }}
+                              disabled={isDeleting === sheet.id}
+                            >
+                              {isDeleting === sheet.id ? (
+                                <Loader size={14} className="mr-1.5 animate-spin" />
+                              ) : (
+                                <X size={14} className="mr-1.5" />
+                              )}
+                              Supprimer
+                            </button>
                           </div>
                         </div>
                       )}
