@@ -8,6 +8,8 @@ import { supabase, TEMPLATES_BUCKET } from './SupabaseClient';
 
 // Préfixe utilisé pour stocker les fichiers dans le localStorage
 const PDF_STORAGE_PREFIX = 'pdf_';
+// Bucket pour les PDFs générés
+const GENERATED_BUCKET = 'generated_pdfs';
 
 /**
  * Nettoie et normalise le chemin du fichier
@@ -62,16 +64,24 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${normalizedPath}`);
     
+    // Déterminer le bucket à utiliser en fonction du préfixe ou du path
+    const isGenerated = normalizedPath.startsWith('feuille_match_') || 
+                        filename.includes('generated_pdfs');
+    const bucketName = isGenerated ? GENERATED_BUCKET : TEMPLATES_BUCKET;
+    
     // Définir tous les chemins possibles
     // Inclut le chemin original, et des variations avec des préfixes courants
     const possiblePaths = [
-      normalizedPath,                // Chemin tel quel
-      `templates/${normalizedPath.split('/').pop()}`,  // Dans dossier templates
-      `modeles/${normalizedPath.split('/').pop()}`,    // Dans dossier modeles
+      normalizedPath,                                       // Chemin tel quel
+      `templates/${normalizedPath.split('/').pop()}`,       // Dans dossier templates
+      `modeles/${normalizedPath.split('/').pop()}`,         // Dans dossier modeles
+      `${normalizedPath.split('/').pop()}`,                 // Juste le nom du fichier
     ];
     
     // Éviter les doublons dans les chemins (ex: modeles/modeles/...)
     const uniquePaths = [...new Set(possiblePaths)];
+    
+    console.log(`Recherche du PDF dans le bucket ${bucketName} avec les chemins:`, uniquePaths);
     
     // Essayer chaque chemin possible jusqu'à ce qu'un fonctionne
     for (const path of uniquePaths) {
@@ -79,7 +89,7 @@ export const getPdf = async (filename: string): Promise<string | null> => {
       
       try {
         const { data, error } = await supabase.storage
-          .from(TEMPLATES_BUCKET)
+          .from(bucketName)
           .download(path);
           
         if (!error && data) {
@@ -90,20 +100,49 @@ export const getPdf = async (filename: string): Promise<string | null> => {
               const base64data = reader.result as string;
               // Stocker dans le localStorage pour un accès plus rapide
               localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
-              console.log(`PDF récupéré depuis Supabase (${path}) et stocké dans localStorage`);
+              console.log(`PDF récupéré depuis Supabase (${bucketName}/${path}) et stocké dans localStorage`);
               resolve(base64data);
             };
             reader.readAsDataURL(data);
           });
         }
       } catch (innerError) {
-        console.warn(`Chemin ${path} non trouvé:`, innerError);
+        console.warn(`Chemin ${bucketName}/${path} non trouvé:`, innerError);
+        // Continuer avec le prochain chemin
+      }
+    }
+    
+    // Si aucun chemin n'a fonctionné, essayer dans l'autre bucket
+    const alternateBucket = isGenerated ? TEMPLATES_BUCKET : GENERATED_BUCKET;
+    console.log(`PDF non trouvé dans ${bucketName}, tentative dans ${alternateBucket}`);
+    
+    for (const path of uniquePaths) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(alternateBucket)
+          .download(path);
+          
+        if (!error && data) {
+          // Convertir le blob en base64
+          const reader = new FileReader();
+          return new Promise((resolve) => {
+            reader.onloadend = () => {
+              const base64data = reader.result as string;
+              // Stocker dans le localStorage pour un accès plus rapide
+              localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
+              console.log(`PDF récupéré depuis Supabase (${alternateBucket}/${path}) et stocké dans localStorage`);
+              resolve(base64data);
+            };
+            reader.readAsDataURL(data);
+          });
+        }
+      } catch (innerError) {
         // Continuer avec le prochain chemin
       }
     }
     
     // Si aucun chemin n'a fonctionné
-    console.error('PDF non trouvé dans Supabase, chemins essayés:', uniquePaths);
+    console.error('PDF non trouvé dans Supabase, chemins essayés dans les buckets', TEMPLATES_BUCKET, 'et', GENERATED_BUCKET);
     throw new Error(`Fichier PDF non trouvé: ${normalizedPath}`);
   } catch (error) {
     console.error('Erreur lors de la récupération du PDF:', error);
@@ -115,13 +154,17 @@ export const getPdf = async (filename: string): Promise<string | null> => {
  * Stocke un PDF dans le stockage local et Supabase
  * @param filename Nom du fichier (sans chemin)
  * @param content Contenu du fichier en base64
+ * @param isGenerated Indique s'il s'agit d'un PDF généré ou d'un modèle
  */
-export const storePdf = async (filename: string, content: string): Promise<boolean> => {
+export const storePdf = async (filename: string, content: string, isGenerated = false): Promise<boolean> => {
   const normalizedPath = normalizeFilePath(filename);
   
   // Stocker dans le localStorage
   localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, content);
   console.log(`PDF stocké dans le localStorage: ${normalizedPath}`);
+  
+  // Déterminer le bucket approprié
+  const bucketName = isGenerated || filename.startsWith('feuille_match_') ? GENERATED_BUCKET : TEMPLATES_BUCKET;
   
   // Vérifier la session Supabase
   const { data: session } = await supabase.auth.getSession();
@@ -135,20 +178,34 @@ export const storePdf = async (filename: string, content: string): Promise<boole
     const base64Response = await fetch(content);
     const blob = await base64Response.blob();
     
+    // S'assurer que le bucket existe
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      if (!buckets?.some(b => b.name === bucketName)) {
+        console.log(`Le bucket ${bucketName} n'existe pas, tentative de création...`);
+        await supabase.storage.createBucket(bucketName, {
+          public: true
+        });
+      }
+    } catch (error) {
+      console.warn(`Erreur lors de la vérification/création du bucket ${bucketName}:`, error);
+      // Continuer quand même, en cas d'erreur de permissions
+    }
+    
     // Uploader vers Supabase
     const { error } = await supabase.storage
-      .from(TEMPLATES_BUCKET)
+      .from(bucketName)
       .upload(normalizedPath, blob, {
         contentType: 'application/pdf',
         upsert: true
       });
     
     if (error) {
-      console.error('Erreur lors du stockage dans Supabase:', error);
+      console.error(`Erreur lors du stockage dans ${bucketName}:`, error);
       return true; // Succès car stocké localement
     }
     
-    console.log(`PDF stocké avec succès dans Supabase: ${normalizedPath}`);
+    console.log(`PDF stocké avec succès dans Supabase (${bucketName}/${normalizedPath})`);
     return true;
   } catch (error) {
     console.warn('Erreur lors du stockage du PDF:', error);
@@ -174,16 +231,21 @@ export const removePdf = async (filename: string): Promise<boolean> => {
   }
   
   try {
-    const { error } = await supabase.storage
-      .from(TEMPLATES_BUCKET)
-      .remove([normalizedPath]);
-    
-    if (error) {
-      console.warn('Erreur lors de la suppression du PDF de Supabase:', error);
-      return true; // Succès car supprimé localement
+    // Essayer de supprimer de chaque bucket
+    for (const bucket of [TEMPLATES_BUCKET, GENERATED_BUCKET]) {
+      try {
+        const { error } = await supabase.storage
+          .from(bucket)
+          .remove([normalizedPath]);
+          
+        if (!error) {
+          console.log(`PDF supprimé avec succès de Supabase (${bucket}/${normalizedPath})`);
+        }
+      } catch (error) {
+        console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error);
+      }
     }
     
-    console.log(`PDF supprimé avec succès de Supabase: ${normalizedPath}`);
     return true;
   } catch (error) {
     console.warn('Erreur lors de la suppression du PDF:', error);
@@ -256,17 +318,16 @@ export const createPdfBlobUrl = (content: string): string => {
  * @param filename Nom du fichier
  * @returns URL publique du fichier
  */
-export const getPublicUrl = async (filename: string): Promise<string> => {
+export const getPublicUrl = (filename: string): string => {
   const normalizedPath = normalizeFilePath(filename);
   
-  const { data: session } = await supabase.auth.getSession();
-  if (!session?.session) {
-    return '';
-  }
+  // Déterminer le bucket à utiliser en fonction du préfixe
+  const isGenerated = normalizedPath.startsWith('feuille_match_');
+  const bucketName = isGenerated ? GENERATED_BUCKET : TEMPLATES_BUCKET;
   
   try {
     const { data } = supabase.storage
-      .from(TEMPLATES_BUCKET)
+      .from(bucketName)
       .getPublicUrl(normalizedPath);
     
     return data.publicUrl;

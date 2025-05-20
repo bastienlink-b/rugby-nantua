@@ -830,6 +830,7 @@ export const addMatchSheet = async (
     template_id: string;
     age_category_id: string;
     referent_coach_id: string;
+    pdf_url?: string; // Ajout du champ pdf_url
   },
   playerIds: string[],
   coachIds: string[]
@@ -930,6 +931,7 @@ export const updateMatchSheet = async (
     template_id?: string;
     age_category_id?: string;
     referent_coach_id?: string;
+    pdf_url?: string; // Ajout du champ pdf_url
   },
   playerIds: string[],
   coachIds: string[]

@@ -29,11 +29,48 @@ const MatchSheets: React.FC = () => {
 
   const handlePreviewMatchSheet = async (matchSheet: any) => {
     try {
+      setIsGenerating(matchSheet.id);
+
+      // Si la feuille de match a déjà un PDF généré, l'utiliser
+      if (matchSheet.pdfUrl) {
+        console.log("Utilisation du PDF déjà généré:", matchSheet.pdfUrl);
+        
+        // Extraire le nom du fichier depuis l'URL
+        const fileName = matchSheet.pdfUrl.split('/').pop();
+        
+        if (fileName) {
+          try {
+            // Récupérer le PDF du stockage
+            const pdfContent = await getPdf(fileName);
+            
+            if (pdfContent) {
+              // Créer une URL pour l'affichage
+              const blobUrl = createPdfBlobUrl(pdfContent);
+              setPreviewUrl(blobUrl);
+              
+              // Stocker le template pour les références
+              const template = templates.find(t => t.id === matchSheet.templateId);
+              if (template) {
+                setSelectedTemplate(template.id);
+              }
+              
+              setIsGenerating(null);
+              return;
+            }
+          } catch (error) {
+            console.warn("Erreur lors de la récupération du PDF stocké, génération à la volée:", error);
+            // En cas d'erreur, continuer avec la génération à la volée
+          }
+        }
+      }
+
+      // Si pas de PDF ou erreur, générer à la volée
       const template = templates.find(t => t.id === matchSheet.templateId);
       const tournament = tournaments.find(t => t.id === matchSheet.tournamentId);
       
       if (!template || !template.fileUrl) {
         alert('Template not found or has no file associated.');
+        setIsGenerating(null);
         return;
       }
       
@@ -64,6 +101,8 @@ const MatchSheets: React.FC = () => {
     } catch (error) {
       console.error('Error previewing match sheet:', error);
       alert('Failed to preview match sheet.');
+    } finally {
+      setIsGenerating(null);
     }
   };
 
@@ -71,12 +110,48 @@ const MatchSheets: React.FC = () => {
     try {
       setIsGenerating(matchSheet.id);
       
+      // Si la feuille de match a déjà un PDF généré, l'utiliser
+      if (matchSheet.pdfUrl) {
+        console.log("Téléchargement du PDF déjà généré:", matchSheet.pdfUrl);
+        
+        // Extraire le nom du fichier depuis l'URL
+        const fileName = matchSheet.pdfUrl.split('/').pop();
+        
+        if (fileName) {
+          try {
+            // Récupérer le PDF du stockage
+            const pdfContent = await getPdf(fileName);
+            
+            if (pdfContent) {
+              // Créer une URL pour le téléchargement
+              const blobUrl = createPdfBlobUrl(pdfContent);
+              
+              // Télécharger le fichier
+              const a = document.createElement('a');
+              a.href = blobUrl;
+              a.download = fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(blobUrl);
+              
+              setIsGenerating(null);
+              return;
+            }
+          } catch (error) {
+            console.warn("Erreur lors de la récupération du PDF stocké, génération à la volée:", error);
+            // En cas d'erreur, continuer avec la génération à la volée
+          }
+        }
+      }
+      
       // Find the related template and tournament
       const template = templates.find(t => t.id === matchSheet.templateId);
       const tournament = tournaments.find(t => t.id === matchSheet.tournamentId);
       
       if (!template || !tournament) {
         alert('Template or tournament not found.');
+        setIsGenerating(null);
         return;
       }
       
@@ -247,6 +322,10 @@ const MatchSheets: React.FC = () => {
                           <p className="text-sm text-gray-600 mb-1">
                             <span className="font-medium">Joueurs:</span> {' '}
                             {sheet.playerIds.length}
+                          </p>
+                          <p className="text-sm text-gray-600 mb-1">
+                            <span className="font-medium">PDF:</span> {' '}
+                            {sheet.pdfUrl ? 'Généré' : 'Non généré'}
                           </p>
                           <p className="text-sm text-gray-600 mb-3">
                             <span className="font-medium">Créée le:</span> {' '}

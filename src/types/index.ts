@@ -57,5 +57,6 @@ export interface MatchSheet {
   referentCoachId: string; // Coach assigned as referent for this match sheet
   playerIds: string[];
   coachIds: string[]; // Array of coach IDs assigned to this match sheet
+  pdfUrl?: string; // URL du PDF généré
   createdAt: Date;
 }

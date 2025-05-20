@@ -88,6 +88,7 @@ const mapMatchSheetFromSupabase = (matchSheet: any): MatchSheet => ({
   referentCoachId: matchSheet.referent_coach_id,
   playerIds: matchSheet.match_sheet_players?.map((msp: any) => msp.player_id) || [],
   coachIds: matchSheet.match_sheet_coaches?.map((msc: any) => msc.coach_id) || [],
+  pdfUrl: matchSheet.pdf_url, // Ajout du champ pdfUrl
   createdAt: new Date(matchSheet.created_at),
 });
 
@@ -429,6 +430,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           template_id: matchSheet.templateId,
           age_category_id: matchSheet.ageCategoryId,
           referent_coach_id: matchSheet.referentCoachId,
+          pdf_url: matchSheet.pdfUrl, // Ajout du champ pdfUrl
         },
         matchSheet.playerIds,
         matchSheet.coachIds
@@ -439,6 +441,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...mapMatchSheetFromSupabase(newMatchSheet),
           playerIds: matchSheet.playerIds,
           coachIds: matchSheet.coachIds,
+          pdfUrl: matchSheet.pdfUrl, // Conserver le pdfUrl
         };
         setMatchSheets(prev => [...prev, mappedMatchSheet]);
       }
@@ -459,6 +462,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           template_id: matchSheet.templateId,
           age_category_id: matchSheet.ageCategoryId,
           referent_coach_id: matchSheet.referentCoachId,
+          pdf_url: matchSheet.pdfUrl, // Ajout du champ pdfUrl
         },
         matchSheet.playerIds,
         matchSheet.coachIds
@@ -469,6 +473,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...mapMatchSheetFromSupabase(updatedMatchSheet),
           playerIds: matchSheet.playerIds,
           coachIds: matchSheet.coachIds,
+          pdfUrl: matchSheet.pdfUrl, // Conserver le pdfUrl
         };
         setMatchSheets(prev => prev.map(ms => ms.id === id ? mappedMatchSheet : ms));
       }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap, Loader } from 'lucide-react';
+import { generateAndStorePdf } from '../services/PdfExportService';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ const MatchSheetCreate: React.FC = () => {
   const [selectedCoaches, setSelectedCoaches] = useState<string[]>([]);
   const [referentCoach, setReferentCoach] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState<string>('');
 
   // Filter templates by selected category
   const availableTemplates = templates.filter(template => 
@@ -52,6 +54,31 @@ const MatchSheetCreate: React.FC = () => {
     
     try {
       setIsSubmitting(true);
+      setGenerationStatus('Création de la feuille de match...');
+      
+      // Récupérer les objets complets
+      const tournament = tournaments.find(t => t.id === selectedTournament);
+      const template = templates.find(t => t.id === selectedTemplate);
+      const selectedPlayerObjects = players.filter(p => selectedPlayers.includes(p.id));
+      const selectedCoachObjects = coaches.filter(c => selectedCoaches.includes(c.id));
+      
+      if (!tournament || !template) {
+        throw new Error('Tournoi ou modèle non trouvé');
+      }
+      
+      // Générer et stocker le PDF
+      setGenerationStatus('Génération du PDF...');
+      const pdfFilename = await generateAndStorePdf(
+        selectedTemplate,
+        selectedTournament,
+        selectedPlayerObjects,
+        selectedCoachObjects,
+        referentCoach,
+        template,
+        tournament
+      );
+      
+      setGenerationStatus('Enregistrement des données...');
       
       const newMatchSheet = {
         tournamentId: selectedTournament,
@@ -60,9 +87,12 @@ const MatchSheetCreate: React.FC = () => {
         referentCoachId: referentCoach,
         playerIds: selectedPlayers,
         coachIds: selectedCoaches,
+        pdfUrl: `/generated_pdfs/${pdfFilename}` // Stocker le chemin vers le PDF généré
       };
       
       await addMatchSheet(newMatchSheet);
+      
+      setGenerationStatus('Feuille de match créée avec succès!');
       
       // Navigate back to match sheets list
       navigate('/match-sheets');
@@ -341,7 +371,7 @@ const MatchSheetCreate: React.FC = () => {
               {isSubmitting ? (
                 <>
                   <Loader size={16} className="animate-spin mr-2" />
-                  Création en cours...
+                  {generationStatus}
                 </>
               ) : (
                 'Créer la feuille'
