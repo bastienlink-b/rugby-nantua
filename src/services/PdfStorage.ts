@@ -38,13 +38,6 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${PDF_STORAGE_FOLDER}${filename}`);
     
-    // Vérifier d'abord la session pour éviter les requêtes inutiles
-    const { data: session } = await supabase.auth.getSession();
-    if (!session?.session) {
-      console.warn('Utilisateur non authentifié. Utilisation du stockage local uniquement.');
-      return null;
-    }
-    
     const { data, error } = await supabase.storage
       .from(TEMPLATES_BUCKET)
       .download(`${PDF_STORAGE_FOLDER}${filename}`);
