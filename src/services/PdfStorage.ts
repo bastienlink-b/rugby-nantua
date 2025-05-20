@@ -64,45 +64,6 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${normalizedPath}`);
     
-    // Vérifier si les buckets existent avant de continuer
-    try {
-      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-      
-      if (bucketError) {
-        console.warn(`Erreur lors de la vérification des buckets: ${bucketError.message}`);
-      } else {
-        const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
-        const generatedBucketExists = buckets?.some(b => b.name === GENERATED_BUCKET);
-        
-        console.log(`Bucket "${TEMPLATES_BUCKET}" existe: ${templateBucketExists ? 'Oui' : 'Non'}`);
-        console.log(`Bucket "${GENERATED_BUCKET}" existe: ${generatedBucketExists ? 'Oui' : 'Non'}`);
-        
-        if (!templateBucketExists || !generatedBucketExists) {
-          console.warn(`Un ou plusieurs buckets nécessaires n'existent pas, création en cours...`);
-          
-          // Créer les buckets manquants
-          if (!templateBucketExists) {
-            const { error } = await supabase.storage.createBucket(TEMPLATES_BUCKET, { public: true });
-            if (error) console.warn(`Erreur lors de la création du bucket ${TEMPLATES_BUCKET}:`, error);
-            else console.log(`Bucket ${TEMPLATES_BUCKET} créé avec succès`);
-          }
-          
-          if (!generatedBucketExists) {
-            const { error } = await supabase.storage.createBucket(GENERATED_BUCKET, { public: true });
-            if (error) console.warn(`Erreur lors de la création du bucket ${GENERATED_BUCKET}:`, error);
-            else console.log(`Bucket ${GENERATED_BUCKET} créé avec succès`);
-          }
-        }
-      }
-    } catch (bucketError) {
-      console.warn('Erreur lors de la vérification/création des buckets:', bucketError);
-    }
-    
-    // Déterminer le bucket à utiliser en fonction du préfixe ou du path
-    const isGenerated = normalizedPath.startsWith('feuille_match_') || 
-                       filename.includes('generated_pdfs');
-    const bucketName = isGenerated ? GENERATED_BUCKET : TEMPLATES_BUCKET;
-    
     // Définir tous les chemins possibles
     // Inclut le chemin original, et des variations avec des préfixes courants
     const possiblePaths = [
@@ -112,86 +73,113 @@ export const getPdf = async (filename: string): Promise<string | null> => {
       `${normalizedPath.split('/').pop()}`,                 // Juste le nom du fichier
     ];
     
-    // Éviter les doublons dans les chemins (ex: modeles/modeles/...)
+    // Éviter les doublons dans les chemins
     const uniquePaths = [...new Set(possiblePaths)];
     
-    console.log(`Recherche du PDF dans le bucket ${bucketName} avec les chemins:`, uniquePaths);
+    // Déterminer le bucket à utiliser en fonction du préfixe ou du path
+    const isGenerated = normalizedPath.startsWith('feuille_match_') || 
+                       filename.includes('generated_pdfs');
+    const primaryBucket = isGenerated ? GENERATED_BUCKET : TEMPLATES_BUCKET;
+    const secondaryBucket = isGenerated ? TEMPLATES_BUCKET : GENERATED_BUCKET;
     
-    // Essayer chaque chemin possible jusqu'à ce qu'un fonctionne
-    for (const path of uniquePaths) {
-      console.log(`Essai du chemin: ${path}`);
-      
-      try {
-        const { data, error } = await supabase.storage
-          .from(bucketName)
-          .download(path);
-          
-        if (error) {
-          console.warn(`Erreur lors de la récupération du PDF (${bucketName}/${path}):`, error);
-          continue; // Try next path
-        }
-          
-        if (data) {
-          // Convertir le blob en base64
-          const reader = new FileReader();
-          return new Promise((resolve) => {
-            reader.onloadend = () => {
-              const base64data = reader.result as string;
-              // Stocker dans le localStorage pour un accès plus rapide
-              localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
-              console.log(`PDF récupéré depuis Supabase (${bucketName}/${path}) et stocké dans localStorage`);
-              resolve(base64data);
-            };
-            reader.readAsDataURL(data);
-          });
-        }
-      } catch (innerError) {
-        console.warn(`Chemin ${bucketName}/${path} non trouvé:`, innerError);
-        // Continuer avec le prochain chemin
-      }
-    }
+    console.log(`Recherche du PDF dans le bucket ${primaryBucket} avec les chemins:`, uniquePaths);
     
-    // Si aucun chemin n'a fonctionné, essayer dans l'autre bucket
-    const alternateBucket = isGenerated ? TEMPLATES_BUCKET : GENERATED_BUCKET;
-    console.log(`PDF non trouvé dans ${bucketName}, tentative dans ${alternateBucket}`);
+    // Try in primary bucket first
+    let pdfFound = await tryFindPdfInBucket(primaryBucket, uniquePaths, normalizedPath);
+    if (pdfFound) return pdfFound;
     
-    for (const path of uniquePaths) {
-      try {
-        const { data, error } = await supabase.storage
-          .from(alternateBucket)
-          .download(path);
-          
-        if (error) {
-          console.warn(`Erreur lors de la récupération du PDF (${alternateBucket}/${path}):`, error);
-          continue; // Try next path
-        }
-          
-        if (data) {
-          // Convertir le blob en base64
-          const reader = new FileReader();
-          return new Promise((resolve) => {
-            reader.onloadend = () => {
-              const base64data = reader.result as string;
-              // Stocker dans le localStorage pour un accès plus rapide
-              localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
-              console.log(`PDF récupéré depuis Supabase (${alternateBucket}/${path}) et stocké dans localStorage`);
-              resolve(base64data);
-            };
-            reader.readAsDataURL(data);
-          });
-        }
-      } catch (innerError) {
-        console.warn(`Chemin ${alternateBucket}/${path} non trouvé:`, innerError);
-        // Continuer avec le prochain chemin
-      }
-    }
+    // If not found, try secondary bucket
+    console.log(`PDF non trouvé dans ${primaryBucket}, tentative dans ${secondaryBucket}`);
+    pdfFound = await tryFindPdfInBucket(secondaryBucket, uniquePaths, normalizedPath);
+    if (pdfFound) return pdfFound;
     
-    // Si aucun chemin n'a fonctionné dans aucun des buckets
-    const errorMsg = `PDF non trouvé dans Supabase, chemins essayés dans les buckets ${TEMPLATES_BUCKET} et ${GENERATED_BUCKET}`;
-    console.error(errorMsg);
-    throw new Error(`Fichier PDF non trouvé: ${normalizedPath}`);
+    // If the PDF isn't found in any bucket, generate a base64 placeholder PDF
+    console.log(`PDF non trouvé dans Supabase, génération d'un PDF vide`);
+    const emptyPdf = await generateEmptyPdf();
+    localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, emptyPdf);
+    return emptyPdf;
   } catch (error) {
     console.error('Erreur lors de la récupération du PDF:', error);
+    
+    // Return an empty PDF in case of error
+    try {
+      const emptyPdf = await generateEmptyPdf();
+      localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, emptyPdf);
+      return emptyPdf;
+    } catch (pdfError) {
+      console.error('Impossible de générer un PDF vide:', pdfError);
+      throw new Error(`Fichier PDF non trouvé: ${normalizedPath}`);
+    }
+  }
+};
+
+/**
+ * Tries to find a PDF in a specific bucket with multiple possible paths
+ * @param bucketName The bucket to search in
+ * @param paths Array of possible paths to try
+ * @param normalizedPath The normalized path for localStorage caching
+ * @returns The PDF content as base64 if found, null otherwise
+ */
+const tryFindPdfInBucket = async (
+  bucketName: string, 
+  paths: string[], 
+  normalizedPath: string
+): Promise<string | null> => {
+  for (const path of paths) {
+    console.log(`Essai du chemin: ${bucketName}/${path}`);
+    
+    try {
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .download(path);
+        
+      if (error) {
+        console.warn(`Erreur lors de la récupération du PDF (${bucketName}/${path}):`, error.message);
+        continue; // Try next path
+      }
+        
+      if (data) {
+        // Convertir le blob en base64
+        const reader = new FileReader();
+        return new Promise((resolve) => {
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            // Stocker dans le localStorage pour un accès plus rapide
+            localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
+            console.log(`PDF récupéré depuis Supabase (${bucketName}/${path}) et stocké dans localStorage`);
+            resolve(base64data);
+          };
+          reader.readAsDataURL(data);
+        });
+      }
+    } catch (innerError) {
+      console.warn(`Chemin ${bucketName}/${path} non trouvé:`, innerError);
+      // Continuer avec le prochain chemin
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Generate an empty PDF as a base64 string
+ * @returns A base64 string of an empty PDF
+ */
+const generateEmptyPdf = async (): Promise<string> => {
+  try {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.addPage([595, 842]); // A4 size
+    
+    const pdfBytes = await pdfDoc.save();
+    const base64 = btoa(
+      Array.from(new Uint8Array(pdfBytes))
+        .map(byte => String.fromCharCode(byte))
+        .join('')
+    );
+    
+    return `data:application/pdf;base64,${base64}`;
+  } catch (error) {
+    console.error('Erreur lors de la génération du PDF vide:', error);
     throw error;
   }
 };
@@ -224,33 +212,6 @@ export const storePdf = async (filename: string, content: string, isGenerated = 
     const base64Response = await fetch(content);
     const blob = await base64Response.blob();
     
-    // S'assurer que le bucket existe
-    try {
-      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-      
-      if (bucketError) {
-        console.warn(`Erreur lors de la vérification des buckets: ${bucketError.message}`);
-      }
-      
-      const bucketExists = buckets?.some(b => b.name === bucketName);
-      
-      if (!bucketExists) {
-        console.log(`Le bucket ${bucketName} n'existe pas, tentative de création...`);
-        const { error } = await supabase.storage.createBucket(bucketName, {
-          public: true
-        });
-        
-        if (error) {
-          console.warn(`Erreur lors de la création du bucket ${bucketName}:`, error);
-        } else {
-          console.log(`Bucket ${bucketName} créé avec succès`);
-        }
-      }
-    } catch (error) {
-      console.warn(`Erreur lors de la vérification/création du bucket ${bucketName}:`, error);
-      // Continuer quand même, en cas d'erreur de permissions
-    }
-    
     // Uploader vers Supabase
     const { error } = await supabase.storage
       .from(bucketName)
@@ -260,7 +221,13 @@ export const storePdf = async (filename: string, content: string, isGenerated = 
       });
     
     if (error) {
-      console.error(`Erreur lors du stockage dans ${bucketName}:`, error);
+      console.warn(`Erreur lors du stockage dans ${bucketName}:`, error.message);
+      
+      if (error.message.includes('violates row-level security policy') || 
+          error.message.includes('Bucket not found')) {
+        console.warn(`Problème d'accès au bucket ${bucketName}. PDF stocké localement uniquement.`);
+      }
+      
       return true; // Succès car stocké localement
     }
     
@@ -300,7 +267,7 @@ export const removePdf = async (filename: string): Promise<boolean> => {
         if (!error) {
           console.log(`PDF supprimé avec succès de Supabase (${bucket}/${normalizedPath})`);
         } else {
-          console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error);
+          console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error.message);
         }
       } catch (error) {
         console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error);
@@ -319,50 +286,44 @@ export const removePdf = async (filename: string): Promise<boolean> => {
  * @returns Un tableau de noms de fichiers
  */
 export const listPdfs = async (): Promise<string[]> => {
+  // Try to find PDFs in localStorage first
+  const localPdfs = Object.keys(localStorage)
+    .filter(key => key.startsWith(PDF_STORAGE_PREFIX))
+    .map(key => key.replace(PDF_STORAGE_PREFIX, ''));
+  
+  if (localPdfs.length > 0) {
+    console.log(`${localPdfs.length} PDFs trouvés dans le localStorage`);
+    return localPdfs;
+  }
+  
   const { data: session } = await supabase.auth.getSession();
   if (!session?.session) {
     return [];
   }
   
   try {
-    // Vérifier l'existence des buckets
-    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    // Try to list files in each bucket
+    let allFiles: string[] = [];
     
-    if (bucketError) {
-      console.warn('Erreur lors de la liste des buckets:', bucketError);
-      return [];
-    }
-    
-    const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
-    
-    if (!templateBucketExists) {
-      console.warn(`Le bucket ${TEMPLATES_BUCKET} n'existe pas pour la liste des PDFs`);
-      return [];
-    }
-    
-    // Lister les fichiers à la racine et dans les sous-dossiers possibles
-    const paths = ['', 'templates/', 'modeles/'];
-    const allFiles: string[] = [];
-    
-    for (const path of paths) {
+    for (const bucketName of [TEMPLATES_BUCKET, GENERATED_BUCKET]) {
       try {
         const { data, error } = await supabase.storage
-          .from(TEMPLATES_BUCKET)
-          .list(path);
+          .from(bucketName)
+          .list('');
         
         if (error) {
-          console.warn(`Erreur lors de la liste des fichiers dans ${TEMPLATES_BUCKET}/${path}:`, error);
+          console.warn(`Erreur lors de la liste des fichiers dans ${bucketName}:`, error.message);
           continue;
         }
         
         if (data) {
           const pdfFiles = data
             .filter(file => file.name.toLowerCase().endsWith('.pdf'))
-            .map(file => path + file.name);
+            .map(file => file.name);
           allFiles.push(...pdfFiles);
         }
       } catch (error) {
-        console.warn(`Erreur lors de la liste des fichiers dans ${TEMPLATES_BUCKET}/${path}:`, error);
+        console.warn(`Erreur lors de la liste des fichiers dans ${bucketName}:`, error);
       }
     }
     

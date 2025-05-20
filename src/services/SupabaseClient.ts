@@ -33,31 +33,9 @@ export const initializeStorage = async () => {
 
     console.log('Vérification de l\'accès aux buckets:', TEMPLATES_BUCKET, 'et', GENERATED_BUCKET);
     
-    // Vérifier l'existence et l'accès aux buckets
-    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
-    
-    if (bucketError) {
-      console.warn('Erreur lors de la liste des buckets:', bucketError);
-      // Si on ne peut pas lister les buckets, essayons quand même de les créer
-      await createBucketsIfNeeded();
-    } else {
-      console.log('Buckets disponibles:', buckets?.map(b => b.name) || []);
-      
-      // Vérifier si les buckets nécessaires existent
-      const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
-      const generatedBucketExists = buckets?.some(b => b.name === GENERATED_BUCKET);
-      
-      console.log(`Le bucket ${TEMPLATES_BUCKET} existe: ${templateBucketExists ? 'Oui' : 'Non'}`);
-      console.log(`Le bucket ${GENERATED_BUCKET} existe: ${generatedBucketExists ? 'Oui' : 'Non'}`);
-      
-      // Créer les buckets manquants
-      if (!templateBucketExists || !generatedBucketExists) {
-        await createBucketsIfNeeded(templateBucketExists, generatedBucketExists);
-      }
-    }
-    
-    // Vérifier l'accès aux buckets individuellement
-    await verifyBucketsAccess();
+    // Instead of listing buckets (which requires admin privileges),
+    // directly check if each bucket exists by trying to list files in it
+    await checkAndCreateBuckets();
     
   } catch (error) {
     console.error('Erreur d\'initialisation du stockage:', error);
@@ -65,81 +43,63 @@ export const initializeStorage = async () => {
   }
 };
 
-// Helper function to create buckets if they don't exist
-const createBucketsIfNeeded = async (templateBucketExists = false, generatedBucketExists = false) => {
-  // Create template bucket if it doesn't exist
-  if (!templateBucketExists) {
-    try {
-      console.log(`Tentative de création du bucket ${TEMPLATES_BUCKET}...`);
-      const { error } = await supabase.storage.createBucket(TEMPLATES_BUCKET, { 
-        public: true,
-        fileSizeLimit: 5242880 // 5MB limit
-      });
-      
-      if (error) {
-        console.warn(`Erreur lors de la création du bucket ${TEMPLATES_BUCKET}:`, error);
-      } else {
-        console.log(`Bucket ${TEMPLATES_BUCKET} créé avec succès!`);
-        
-        // Set CORS policy for the bucket
-        const { error: corsError } = await supabase.storage.getBucket(TEMPLATES_BUCKET);
-        if (corsError) {
-          console.warn(`Erreur lors de la configuration CORS pour ${TEMPLATES_BUCKET}:`, corsError);
-        }
-      }
-    } catch (error) {
-      console.warn(`Exception lors de la création du bucket ${TEMPLATES_BUCKET}:`, error);
-    }
-  }
+// Check if buckets exist and create them if needed
+const checkAndCreateBuckets = async () => {
+  // Check template bucket
+  await checkAndCreateBucket(TEMPLATES_BUCKET);
   
-  // Create generated PDFs bucket if it doesn't exist
-  if (!generatedBucketExists) {
-    try {
-      console.log(`Tentative de création du bucket ${GENERATED_BUCKET}...`);
-      const { error } = await supabase.storage.createBucket(GENERATED_BUCKET, { 
-        public: true,
-        fileSizeLimit: 5242880 // 5MB limit
-      });
+  // Check generated bucket
+  await checkAndCreateBucket(GENERATED_BUCKET);
+};
+
+// Helper function to check if a bucket exists and create it if needed
+const checkAndCreateBucket = async (bucketName: string) => {
+  try {
+    console.log(`Vérification de l'accès au bucket ${bucketName}...`);
+    
+    // Try to list files in the bucket to check if it exists and is accessible
+    const { data, error } = await supabase.storage.from(bucketName).list('', {
+      limit: 1,
+      offset: 0,
+    });
+    
+    if (error) {
+      console.warn(`Erreur lors de l'accès au bucket ${bucketName}:`, error.message);
       
-      if (error) {
-        console.warn(`Erreur lors de la création du bucket ${GENERATED_BUCKET}:`, error);
-      } else {
-        console.log(`Bucket ${GENERATED_BUCKET} créé avec succès!`);
-        
-        // Set CORS policy for the bucket
-        const { error: corsError } = await supabase.storage.getBucket(GENERATED_BUCKET);
-        if (corsError) {
-          console.warn(`Erreur lors de la configuration CORS pour ${GENERATED_BUCKET}:`, corsError);
-        }
+      // If bucket doesn't exist or we don't have access, try to create it
+      if (error.message.includes('not found') || error.message.includes('does not exist')) {
+        await createBucket(bucketName);
+      } else if (error.message.includes('violates row-level security policy')) {
+        console.warn(`Problème de permission pour accéder au bucket ${bucketName}. Utilisation du stockage local.`);
       }
-    } catch (error) {
-      console.warn(`Exception lors de la création du bucket ${GENERATED_BUCKET}:`, error);
+    } else {
+      console.log(`Accès réussi au bucket ${bucketName}. Fichiers disponibles:`, data?.length || 0);
     }
+  } catch (error) {
+    console.warn(`Exception lors de l'accès au bucket ${bucketName}:`, error);
   }
 };
 
-// Helper function to verify access to buckets
-const verifyBucketsAccess = async () => {
-  for (const bucket of [TEMPLATES_BUCKET, GENERATED_BUCKET]) {
-    try {
-      console.log(`Vérification de l'accès au bucket ${bucket}...`);
-      const { data, error } = await supabase.storage.from(bucket).list('', {
-        limit: 1,
-        offset: 0,
-      });
+// Helper function to create a bucket
+const createBucket = async (bucketName: string) => {
+  try {
+    console.log(`Tentative de création du bucket ${bucketName}...`);
+    
+    const { error } = await supabase.storage.createBucket(bucketName, { 
+      public: true,
+      fileSizeLimit: 5242880 // 5MB limit
+    });
+    
+    if (error) {
+      console.warn(`Erreur lors de la création du bucket ${bucketName}:`, error.message);
       
-      if (error) {
-        console.warn(`Erreur lors de l'accès au bucket ${bucket}:`, error);
-        // If error.message includes "The resource was not found", the bucket doesn't exist
-        if (error.message && error.message.includes('not found')) {
-          console.log(`Le bucket ${bucket} n'existe pas, nouvelle tentative de création...`);
-          await createBucketsIfNeeded(bucket !== TEMPLATES_BUCKET, bucket !== GENERATED_BUCKET);
-        }
-      } else {
-        console.log(`Accès réussi au bucket ${bucket}. Fichiers disponibles:`, data?.length || 0);
+      if (error.message.includes('violates row-level security policy')) {
+        console.warn(`Permissions insuffisantes pour créer le bucket ${bucketName}. Les PDFs seront stockés localement.`);
       }
-    } catch (error) {
-      console.warn(`Exception lors de l'accès au bucket ${bucket}:`, error);
+    } else {
+      console.log(`Bucket ${bucketName} créé avec succès!`);
     }
+  } catch (error) {
+    console.warn(`Exception lors de la création du bucket ${bucketName}:`, error);
   }
 };
