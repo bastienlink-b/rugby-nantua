@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap, Loader } from 'lucide-react';
 import { generateAndStorePdf } from '../services/PdfExportService';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { tournaments, templates, players, coaches, ageCategories, addMatchSheet } = useAppContext();
+  const { tournaments, templates, players, coaches, ageCategories, addMatchSheet, updateMatchSheet, getMatchSheetById } = useAppContext();
   const [selectedTournament, setSelectedTournament] = useState<string>(searchParams.get('tournamentId') || '');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -16,6 +17,36 @@ const MatchSheetCreate: React.FC = () => {
   const [referentCoach, setReferentCoach] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<string>('');
+  const [editMode, setEditMode] = useState<boolean>(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [existingPdfUrl, setExistingPdfUrl] = useState<string | null>(null);
+
+  // Check if in edit mode
+  useEffect(() => {
+    // Extract matchSheetId from search parameters or location state
+    const matchSheetId = searchParams.get('id') || 
+                        (location.state as { id?: string })?.id;
+    
+    if (matchSheetId) {
+      setEditMode(true);
+      setEditId(matchSheetId);
+      loadMatchSheetData(matchSheetId);
+    }
+  }, [searchParams, location]);
+
+  // Load match sheet data when in edit mode
+  const loadMatchSheetData = async (id: string) => {
+    const matchSheet = await getMatchSheetById(id);
+    if (matchSheet) {
+      setSelectedTournament(matchSheet.tournamentId || '');
+      setSelectedTemplate(matchSheet.templateId || '');
+      setSelectedCategory(matchSheet.ageCategoryId || '');
+      setSelectedPlayers(matchSheet.playerIds || []);
+      setSelectedCoaches(matchSheet.coachIds || []);
+      setReferentCoach(matchSheet.referentCoachId || '');
+      setExistingPdfUrl(matchSheet.pdfUrl || null);
+    }
+  };
 
   // Filter templates by selected category
   const availableTemplates = templates.filter(template => 
@@ -65,34 +96,45 @@ const MatchSheetCreate: React.FC = () => {
       if (!tournament || !template) {
         throw new Error('Tournoi ou modèle non trouvé');
       }
+
+      let pdfUrl = existingPdfUrl;
       
-      // Générer et stocker le PDF
-      setGenerationStatus('Génération du PDF...');
-      const pdfFilename = await generateAndStorePdf(
-        selectedTemplate,
-        selectedTournament,
-        selectedPlayerObjects,
-        selectedCoachObjects,
-        referentCoach,
-        template,
-        tournament
-      );
+      // Générer un nouveau PDF si on est en mode création ou si un paramètre important a changé en mode édition
+      if (!editMode || !existingPdfUrl || 
+          (editMode && (selectedPlayers.length > 0 || selectedCoaches.length > 0))) {
+        // Générer et stocker le PDF
+        setGenerationStatus('Génération du PDF...');
+        const pdfFilename = await generateAndStorePdf(
+          selectedTemplate,
+          selectedTournament,
+          selectedPlayerObjects,
+          selectedCoachObjects,
+          referentCoach,
+          template,
+          tournament
+        );
+        pdfUrl = `/generated_pdfs/${pdfFilename}`;
+      }
       
       setGenerationStatus('Enregistrement des données...');
       
-      const newMatchSheet = {
+      const matchSheetData = {
         tournamentId: selectedTournament,
         templateId: selectedTemplate,
         ageCategoryId: selectedCategory,
         referentCoachId: referentCoach,
         playerIds: selectedPlayers,
         coachIds: selectedCoaches,
-        pdfUrl: `/generated_pdfs/${pdfFilename}` // Stocker le chemin vers le PDF généré
+        pdfUrl: pdfUrl || undefined
       };
       
-      await addMatchSheet(newMatchSheet);
-      
-      setGenerationStatus('Feuille de match créée avec succès!');
+      if (editMode && editId) {
+        await updateMatchSheet(editId, matchSheetData);
+        setGenerationStatus('Feuille de match mise à jour avec succès!');
+      } else {
+        await addMatchSheet(matchSheetData);
+        setGenerationStatus('Feuille de match créée avec succès!');
+      }
       
       // Navigate back to match sheets list
       navigate('/match-sheets');
@@ -114,9 +156,13 @@ const MatchSheetCreate: React.FC = () => {
           <ArrowLeft size={20} />
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Nouvelle Feuille de Match</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {editMode ? 'Modifier la Feuille de Match' : 'Nouvelle Feuille de Match'}
+          </h1>
           <p className="text-gray-600 mt-1">
-            Créez une nouvelle feuille de match en sélectionnant un tournoi et un modèle
+            {editMode 
+              ? 'Modifiez les informations de la feuille de match existante'
+              : 'Créez une nouvelle feuille de match en sélectionnant un tournoi et un modèle'}
           </p>
         </div>
       </div>
@@ -134,6 +180,7 @@ const MatchSheetCreate: React.FC = () => {
                 onChange={(e) => setSelectedTournament(e.target.value)}
                 required
                 className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                disabled={editMode}
               >
                 <option value="">Sélectionner un tournoi</option>
                 {tournaments.map((tournament) => (
@@ -374,7 +421,7 @@ const MatchSheetCreate: React.FC = () => {
                   {generationStatus}
                 </>
               ) : (
-                'Créer la feuille'
+                `${editMode ? 'Mettre à jour' : 'Créer'} la feuille`
               )}
             </button>
           </div>

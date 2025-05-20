@@ -27,6 +27,7 @@ interface AppContextType {
   addMatchSheet: (matchSheet: MatchSheet) => Promise<void>;
   updateMatchSheet: (id: string, matchSheet: MatchSheet) => Promise<void>;
   deleteMatchSheet: (id: string) => Promise<void>;
+  getMatchSheetById: (id: string) => Promise<MatchSheet | null>;
   
   addTemplate: (template: Template) => Promise<void>;
   updateTemplate: (id: string, template: Template) => Promise<void>;
@@ -495,6 +496,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       throw err;
     }
   };
+  
+  const getMatchSheetById = async (id: string): Promise<MatchSheet | null> => {
+    try {
+      const matchSheet = matchSheets.find(ms => ms.id === id);
+      if (matchSheet) {
+        return matchSheet;
+      }
+      
+      // If not found in state, fetch from API
+      const fetchedSheet = await supabaseService.getMatchSheet(id);
+      if (fetchedSheet) {
+        return mapMatchSheetFromSupabase(fetchedSheet);
+      }
+      
+      return null;
+    } catch (err) {
+      console.error('Error getting match sheet by ID:', err);
+      setError(err instanceof Error ? err.message : 'Une erreur est survenue lors de la récupération de la feuille de match.');
+      return null;
+    }
+  };
 
   const refreshData = async () => {
     await fetchData();
@@ -523,6 +545,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addMatchSheet,
         updateMatchSheet,
         deleteMatchSheet,
+        getMatchSheetById,
         addTemplate,
         updateTemplate,
         deleteTemplate,

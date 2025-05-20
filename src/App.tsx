@@ -26,6 +26,7 @@ function App() {
             <Route path="match-sheets">
               <Route index element={<MatchSheets />} />
               <Route path="create" element={<MatchSheetCreate />} />
+              <Route path="edit/:id" element={<MatchSheetCreate />} />
             </Route>
           </Route>
         </Routes>

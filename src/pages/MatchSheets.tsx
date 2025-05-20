@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, Link } from 'react-router-dom';
 import { 
-  Plus, Search, FileText, Check, ArrowLeft, Download, ChevronDown, ChevronUp, X, User, Award, Loader
+  Plus, Search, FileText, Check, ArrowLeft, Download, ChevronDown, ChevronUp, X, User, Award, Loader, Edit
 } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
 import { getPdf, createPdfBlobUrl } from '../services/PdfStorage';
@@ -224,7 +224,7 @@ const MatchSheets: React.FC = () => {
           </p>
         </div>
         <Link
-          to="/match-sheets/create" // This would be the route to create a new match sheet
+          to="/match-sheets/create"
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md flex items-center"
         >
           <Plus size={18} className="mr-1" />
@@ -338,6 +338,12 @@ const MatchSheets: React.FC = () => {
                                 <Download size={14} className="mr-1" /> Télécharger
                               </button>
                             )}
+                            <Link 
+                              to={`/match-sheets/create?id=${sheet.id}`} 
+                              className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded-md flex items-center hover:bg-indigo-200 mb-1"
+                            >
+                              <Edit size={14} className="mr-1" /> Éditer
+                            </Link>
                             {isDeleting === sheet.id ? (
                               <button
                                 className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75 mb-1"

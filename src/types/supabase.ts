@@ -269,6 +269,7 @@ export interface Database {
           template_id: string | null
           age_category_id: string | null
           referent_coach_id: string | null
+          pdf_url: string | null
           created_at: string
         }
         Insert: {
@@ -277,6 +278,7 @@ export interface Database {
           template_id?: string | null
           age_category_id?: string | null
           referent_coach_id?: string | null
+          pdf_url?: string | null
           created_at?: string
         }
         Update: {
@@ -285,6 +287,7 @@ export interface Database {
           template_id?: string | null
           age_category_id?: string | null
           referent_coach_id?: string | null
+          pdf_url?: string | null
           created_at?: string
         }
         Relationships: [
