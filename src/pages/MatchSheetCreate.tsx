@@ -43,44 +43,32 @@ const MatchSheetCreate: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate all required fields
-    const requiredFields = [
-      { value: selectedTournament, name: 'Tournoi' },
-      { value: selectedCategory, name: 'Catégorie' },
-      { value: selectedTemplate, name: 'Modèle de feuille' },
-      { value: selectedPlayers.length > 0, name: 'Joueurs' },
-      { value: selectedCoaches.length > 0, name: 'Entraîneurs' },
-      { value: referentCoach, name: 'Entraîneur référent' }
-    ];
-    
-    const missingFields = requiredFields
-      .filter(field => !field.value)
-      .map(field => field.name);
-    
-    if (missingFields.length > 0) {
-      const missingFieldsText = missingFields.join(', ');
-      alert('Veuillez remplir tous les champs obligatoires');
+    // Validate form data
+    if (!selectedTournament || !selectedCategory || !selectedTemplate || 
+        selectedPlayers.length === 0 || selectedCoaches.length === 0 || !referentCoach) {
+      alert('Veuillez remplir tous les champs obligatoires.');
       return;
     }
     
     try {
       setIsSubmitting(true);
       
-      // Create the match sheet
-      await addMatchSheet({
+      const newMatchSheet = {
         tournamentId: selectedTournament,
         templateId: selectedTemplate,
         ageCategoryId: selectedCategory,
         referentCoachId: referentCoach,
         playerIds: selectedPlayers,
         coachIds: selectedCoaches,
-      });
+      };
+      
+      await addMatchSheet(newMatchSheet);
       
       // Navigate back to match sheets list
       navigate('/match-sheets');
     } catch (error) {
       console.error('Error creating match sheet:', error);
-      alert('Une erreur est survenue lors de la création de la feuille de match');
+      alert('Une erreur est survenue lors de la création de la feuille de match.');
     } finally {
       setIsSubmitting(false);
     }
