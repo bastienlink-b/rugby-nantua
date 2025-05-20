@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap } from 'lucide-react';
+import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap, Loader } from 'lucide-react';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { tournaments, templates, players, coaches, ageCategories } = useAppContext();
+  const { tournaments, templates, players, coaches, ageCategories, addMatchSheet } = useAppContext();
   const [selectedTournament, setSelectedTournament] = useState<string>(searchParams.get('tournamentId') || '');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [selectedCoaches, setSelectedCoaches] = useState<string[]>([]);
   const [referentCoach, setReferentCoach] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Filter templates by selected category
   const availableTemplates = templates.filter(template => 
@@ -39,10 +40,35 @@ const MatchSheetCreate: React.FC = () => {
     }
   }, [selectedTournament, tournaments]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Implement match sheet creation
-    navigate('/match-sheets');
+    
+    if (!selectedTournament || !selectedTemplate || !selectedCategory || !referentCoach) {
+      alert('Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+    
+    try {
+      setIsSubmitting(true);
+      
+      // Create the match sheet
+      await addMatchSheet({
+        tournamentId: selectedTournament,
+        templateId: selectedTemplate,
+        ageCategoryId: selectedCategory,
+        referentCoachId: referentCoach,
+        playerIds: selectedPlayers,
+        coachIds: selectedCoaches,
+      });
+      
+      // Navigate back to match sheets list
+      navigate('/match-sheets');
+    } catch (error) {
+      console.error('Error creating match sheet:', error);
+      alert('Une erreur est survenue lors de la création de la feuille de match');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -295,6 +321,7 @@ const MatchSheetCreate: React.FC = () => {
           <div className="flex justify-end space-x-3 pt-6 border-t">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => navigate(-1)}
               className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
@@ -302,9 +329,19 @@ const MatchSheetCreate: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              disabled={isSubmitting}
+              className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                isSubmitting ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              } inline-flex items-center`}
             >
-              Créer la feuille
+              {isSubmitting ? (
+                <>
+                  <Loader size={16} className="animate-spin mr-2" />
+                  Création en cours...
+                </>
+              ) : (
+                'Créer la feuille'
+              )}
             </button>
           </div>
         </form>

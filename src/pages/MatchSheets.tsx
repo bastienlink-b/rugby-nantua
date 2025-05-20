@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, Link } from 'react-router-dom';
 import { 
-  Plus, Search, FileText, Check, ArrowLeft, Download, ChevronDown, ChevronUp, X, User, Award 
+  Plus, Search, FileText, Check, ArrowLeft, Download, ChevronDown, ChevronUp, X, User, Award, Loader
 } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
 import { getPdf, createPdfBlobUrl } from '../services/PdfStorage';
@@ -16,6 +16,7 @@ const MatchSheets: React.FC = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState<string | null>(null);
 
   useEffect(() => {
     // Check for tournament filter in URL params
@@ -52,6 +53,8 @@ const MatchSheets: React.FC = () => {
 
   const handleDownloadMatchSheet = async (matchSheet: any) => {
     try {
+      setIsGenerating(matchSheet.id);
+      
       // Find the related template and tournament
       const template = templates.find(t => t.id === matchSheet.templateId);
       const tournament = tournaments.find(t => t.id === matchSheet.tournamentId);
@@ -78,6 +81,8 @@ const MatchSheets: React.FC = () => {
     } catch (error) {
       console.error('Error downloading match sheet:', error);
       alert('Failed to download match sheet.');
+    } finally {
+      setIsGenerating(null);
     }
   };
 
@@ -204,12 +209,21 @@ const MatchSheets: React.FC = () => {
                             >
                               <FileText size={14} className="mr-1" /> Aperçu
                             </button>
-                            <button
-                              className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center"
-                              onClick={() => handleDownloadMatchSheet(sheet)}
-                            >
-                              <Download size={14} className="mr-1" /> Télécharger
-                            </button>
+                            {isGenerating === sheet.id ? (
+                              <button
+                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75"
+                                disabled
+                              >
+                                <Loader size={14} className="mr-1 animate-spin" /> Génération...
+                              </button>
+                            ) : (
+                              <button
+                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center hover:bg-green-200"
+                                onClick={() => handleDownloadMatchSheet(sheet)}
+                              >
+                                <Download size={14} className="mr-1" /> Télécharger
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}
