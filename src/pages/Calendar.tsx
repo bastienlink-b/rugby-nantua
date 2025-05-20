@@ -327,9 +327,14 @@ const Calendar: React.FC = () => {
                 {/* Événements du jour */}
                 <div className="mt-1 space-y-1 max-h-24 overflow-y-auto">
                   {filteredEvents.map(event => {
-                    // Pour chaque événement, choisir la couleur de la première catégorie
                     const firstCategoryId = event.categoryIds[0];
                     const color = firstCategoryId ? CATEGORY_COLORS[firstCategoryId] || DEFAULT_COLOR : DEFAULT_COLOR;
+                    
+                    // Get category names for this event
+                    const categoryNames = event.categoryIds
+                      .map(id => ageCategories.find(cat => cat.id === id)?.name)
+                      .filter(Boolean)
+                      .join(', ');
                     
                     return (
                       <button
@@ -337,7 +342,7 @@ const Calendar: React.FC = () => {
                         onClick={() => setSelectedEvent(event)}
                         className={`block w-full text-left px-2 py-1 text-xs rounded-md truncate ${color.bg} ${color.text} ${color.border} hover:opacity-80`}
                       >
-                        {event.title}
+                        {event.title} • {categoryNames}
                       </button>
                     );
                   })}
@@ -368,6 +373,10 @@ const Calendar: React.FC = () => {
               <div>
                 <h4 className="font-medium text-lg">{selectedEvent.title}</h4>
                 <p className="text-gray-600">
+                  {selectedEvent.categoryIds
+                    .map(id => ageCategories.find(cat => cat.id === id)?.name)
+                    .filter(Boolean)
+                    .join(', ')} •{' '}
                   {selectedEvent.date.toLocaleDateString('fr-FR', {
                     weekday: 'long',
                     year: 'numeric',
