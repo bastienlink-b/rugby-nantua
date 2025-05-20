@@ -28,7 +28,6 @@ const MatchSheets: React.FC = () => {
 
   const handlePreviewMatchSheet = async (matchSheet: any) => {
     try {
-      // Find the related template and tournament
       const template = templates.find(t => t.id === matchSheet.templateId);
       const tournament = tournaments.find(t => t.id === matchSheet.tournamentId);
       
@@ -37,13 +36,29 @@ const MatchSheets: React.FC = () => {
         return;
       }
       
-      // Get the selected players and coaches for this match sheet
       const selectedPlayers = players.filter(p => matchSheet.playerIds.includes(p.id));
       const selectedCoaches = coaches.filter(c => matchSheet.coachIds.includes(c.id));
       
-      // Set the preview URL to the template PDF for now
-      // In a real implementation, we would generate a filled PDF on the fly
-      setPreviewUrl(template.fileUrl);
+      // Generate the preview PDF
+      const pdfBytes = await generateAndDownloadMatchSheet(
+        matchSheet.templateId,
+        matchSheet.tournamentId,
+        selectedPlayers,
+        selectedCoaches,
+        matchSheet.referentCoachId,
+        template,
+        tournament,
+        true // preview mode - don't trigger download
+      );
+      
+      // Convert PDF bytes to base64 and create blob URL
+      const base64Pdf = btoa(
+        Array.from(new Uint8Array(pdfBytes))
+          .map(byte => String.fromCharCode(byte))
+          .join('')
+      );
+      const pdfDataUri = `data:application/pdf;base64,${base64Pdf}`;
+      setPreviewUrl(pdfDataUri);
       setSelectedTemplate(template.id);
     } catch (error) {
       console.error('Error previewing match sheet:', error);

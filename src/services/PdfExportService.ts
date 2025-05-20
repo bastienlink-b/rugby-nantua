@@ -13,7 +13,8 @@ export const generateAndDownloadMatchSheet = async (
   coaches: Coach[],
   referentCoachId: string,
   template: Template,
-  tournament: Tournament
+  tournament: Tournament,
+  previewOnly: boolean = false
 ): Promise<void> => {
   try {
     // Génération du PDF
@@ -28,6 +29,11 @@ export const generateAndDownloadMatchSheet = async (
     });
     
     // Conversion en Base64
+    // If preview only, return the PDF bytes
+    if (previewOnly) {
+      return pdfBytes;
+    }
+    
     const pdfBase64 = btoa(
       Array.from(new Uint8Array(pdfBytes))
         .map(byte => String.fromCharCode(byte))
