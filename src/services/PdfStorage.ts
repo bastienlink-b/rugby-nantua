@@ -23,6 +23,14 @@ const normalizeFilePath = (filename: string): string => {
     normalized = normalized.split('/').pop() || normalized;
   }
   
+  // Éviter les duplications de dossiers dans le chemin
+  // Par exemple, éviter modeles/modeles/file.pdf
+  const segments = normalized.split('/');
+  if (segments.length > 1 && segments[0] === segments[1]) {
+    segments.shift(); // Supprimer le premier segment dupliqué
+    normalized = segments.join('/');
+  }
+  
   return normalized;
 };
 
@@ -54,26 +62,27 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${normalizedPath}`);
     
-    // Essayer d'abord avec le chemin direct
-    const { data, error } = await supabase.storage
-      .from(TEMPLATES_BUCKET)
-      .download(normalizedPath);
+    // Définir tous les chemins possibles
+    // Inclut le chemin original, et des variations avec des préfixes courants
+    const possiblePaths = [
+      normalizedPath,                // Chemin tel quel
+      `templates/${normalizedPath.split('/').pop()}`,  // Dans dossier templates
+      `modeles/${normalizedPath.split('/').pop()}`,    // Dans dossier modeles
+    ];
     
-    if (error) {
-      // Si le fichier n'est pas trouvé, vérifier s'il existe dans un sous-dossier
-      const possiblePaths = [
-        normalizedPath,
-        `templates/${normalizedPath}`,
-        `modeles/${normalizedPath}`,
-      ];
+    // Éviter les doublons dans les chemins (ex: modeles/modeles/...)
+    const uniquePaths = [...new Set(possiblePaths)];
+    
+    // Essayer chaque chemin possible jusqu'à ce qu'un fonctionne
+    for (const path of uniquePaths) {
+      console.log(`Essai du chemin: ${path}`);
       
-      // Essayer chaque chemin possible
-      for (const path of possiblePaths) {
-        const { data: pathData, error: pathError } = await supabase.storage
+      try {
+        const { data, error } = await supabase.storage
           .from(TEMPLATES_BUCKET)
           .download(path);
           
-        if (!pathError && pathData) {
+        if (!error && data) {
           // Convertir le blob en base64
           const reader = new FileReader();
           return new Promise((resolve) => {
@@ -84,33 +93,18 @@ export const getPdf = async (filename: string): Promise<string | null> => {
               console.log(`PDF récupéré depuis Supabase (${path}) et stocké dans localStorage`);
               resolve(base64data);
             };
-            reader.readAsDataURL(pathData);
+            reader.readAsDataURL(data);
           });
         }
+      } catch (innerError) {
+        console.warn(`Chemin ${path} non trouvé:`, innerError);
+        // Continuer avec le prochain chemin
       }
-      
-      // Si aucun chemin n'a fonctionné, logger l'erreur et retourner null
-      console.error('PDF non trouvé dans Supabase:', normalizedPath);
-      throw new Error('Fichier PDF non trouvé');
     }
     
-    if (!data) {
-      console.warn(`Aucune donnée reçue pour le fichier ${normalizedPath}`);
-      return null;
-    }
-    
-    // Convertir le blob en base64
-    const reader = new FileReader();
-    return new Promise((resolve) => {
-      reader.onloadend = () => {
-        const base64data = reader.result as string;
-        // Stocker dans le localStorage pour un accès plus rapide
-        localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, base64data);
-        console.log(`PDF récupéré depuis Supabase et stocké dans localStorage: ${normalizedPath}`);
-        resolve(base64data);
-      };
-      reader.readAsDataURL(data);
-    });
+    // Si aucun chemin n'a fonctionné
+    console.error('PDF non trouvé dans Supabase, chemins essayés:', uniquePaths);
+    throw new Error(`Fichier PDF non trouvé: ${normalizedPath}`);
   } catch (error) {
     console.error('Erreur lors de la récupération du PDF:', error);
     throw error;
