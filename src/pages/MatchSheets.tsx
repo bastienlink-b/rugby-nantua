@@ -9,7 +9,7 @@ import { getPdf, createPdfBlobUrl } from '../services/PdfStorage';
 import { generateAndDownloadMatchSheet } from '../services/PdfExportService';
 
 const MatchSheets: React.FC = () => {
-  const { matchSheets, tournaments, templates, players, coaches } = useAppContext();
+  const { matchSheets, tournaments, templates, players, coaches, deleteMatchSheet } = useAppContext();
   const [searchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>('');
@@ -17,6 +17,7 @@ const MatchSheets: React.FC = () => {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     // Check for tournament filter in URL params
@@ -101,6 +102,25 @@ const MatchSheets: React.FC = () => {
     }
   };
 
+  const handleDeleteMatchSheet = async (id: string, locationName: string) => {
+    if (window.confirm(`Êtes-vous sûr de vouloir supprimer la feuille de match pour "${locationName}" ?`)) {
+      setIsDeleting(id);
+      try {
+        await deleteMatchSheet(id);
+        // Reset preview if the deleted match sheet was being previewed
+        if (previewUrl) {
+          setPreviewUrl(null);
+          setSelectedTemplate(null);
+        }
+      } catch (error) {
+        console.error('Error deleting match sheet:', error);
+        alert('Failed to delete match sheet.');
+      } finally {
+        setIsDeleting(null);
+      }
+    }
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedItems(prev => ({
       ...prev,
@@ -118,6 +138,22 @@ const MatchSheets: React.FC = () => {
     
     return matchesSearch && matchesTournament;
   });
+
+  // Find and delete the Gex match sheet on component mount if it exists
+  useEffect(() => {
+    const deleteGexMatchSheet = async () => {
+      const gexSheet = matchSheets.find(sheet => {
+        const tournament = tournaments.find(t => t.id === sheet.tournamentId);
+        return tournament && tournament.location === "Gex";
+      });
+      
+      if (gexSheet) {
+        await handleDeleteMatchSheet(gexSheet.id, "Gex");
+      }
+    };
+    
+    deleteGexMatchSheet();
+  }, [matchSheets, tournaments]);
 
   return (
     <div>
@@ -217,26 +253,41 @@ const MatchSheets: React.FC = () => {
                             {sheet.createdAt.toLocaleDateString()}
                           </p>
                           
-                          <div className="flex space-x-2">
+                          <div className="flex flex-wrap space-x-2">
                             <button
-                              className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md flex items-center"
+                              className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md flex items-center mb-1"
                               onClick={() => handlePreviewMatchSheet(sheet)}
                             >
                               <FileText size={14} className="mr-1" /> Aperçu
                             </button>
                             {isGenerating === sheet.id ? (
                               <button
-                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75"
+                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75 mb-1"
                                 disabled
                               >
                                 <Loader size={14} className="mr-1 animate-spin" /> Génération...
                               </button>
                             ) : (
                               <button
-                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center hover:bg-green-200"
+                                className="text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md flex items-center hover:bg-green-200 mb-1"
                                 onClick={() => handleDownloadMatchSheet(sheet)}
                               >
                                 <Download size={14} className="mr-1" /> Télécharger
+                              </button>
+                            )}
+                            {isDeleting === sheet.id ? (
+                              <button
+                                className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md flex items-center cursor-not-allowed opacity-75 mb-1"
+                                disabled
+                              >
+                                <Loader size={14} className="mr-1 animate-spin" /> Suppression...
+                              </button>
+                            ) : (
+                              <button
+                                className="text-sm bg-red-100 text-red-700 px-3 py-1 rounded-md flex items-center hover:bg-red-200 mb-1"
+                                onClick={() => handleDeleteMatchSheet(sheet.id, tournament?.location || 'Inconnu')}
+                              >
+                                <X size={14} className="mr-1" /> Supprimer
                               </button>
                             )}
                           </div>
