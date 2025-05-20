@@ -567,22 +567,22 @@ const Templates: React.FC = () => {
                   {template.description || "Pas de description"}
                 </p>
                 
-                <div className="mt-3 flex justify-between items-center">
+                <div className="mt-3 flex flex-col space-y-2">
                   <div className="flex items-center text-sm text-gray-600">
                     <FileText size={16} className="mr-1" />
-                    <span className="truncate max-w-[150px]">{template.fileUrl.split('/').pop()}</span>
+                    <span className="truncate max-w-[250px]">{template.fileUrl.split('/').pop()}</span>
                   </div>
                   
-                  <div className="flex items-center space-x-2">
+                  <div className="flex justify-between items-center">
                     {template.fieldMappings && template.fieldMappings.length > 0 && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         <Check size={12} className="mr-1" />
-                        Analysé
+                        {template.fieldMappings.length} champs analysés
                       </span>
                     )}
                     <a 
                       href={template.fileUrl} 
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium ml-auto"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -873,10 +873,11 @@ const Templates: React.FC = () => {
                               )}
                             </button>
                             
+                            {/* Affichage du résultat de l'analyse - maintenant en-dessous des autres éléments */}
                             {ocrStatus === 'success' && (
-                              <div className="bg-green-50 p-2 rounded-md flex items-center justify-between">
+                              <div className="bg-green-50 p-2 rounded-md flex flex-wrap items-center justify-between">
                                 <div className="flex items-center">
-                                  <Check size={16} className="text-green-500 mr-2" />
+                                  <Check size={16} className="text-green-500 mr-2 flex-shrink-0" />
                                   <span className="text-sm text-green-700">
                                     {formData.fieldMappings?.length} champs détectés
                                     {hasAnalysis(uploadedFileName) ? 
@@ -887,7 +888,7 @@ const Templates: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => setShowMappingEditor(true)}
-                                  className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center"
+                                  className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center mt-1 sm:mt-0"
                                 >
                                   <Eye size={14} className="mr-1" />
                                   Voir le mapping
