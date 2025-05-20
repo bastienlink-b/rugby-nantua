@@ -43,7 +43,22 @@ const MatchSheetCreate: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedTournament || !selectedTemplate || !selectedCategory || !referentCoach) {
+    // Validate all required fields
+    const requiredFields = [
+      { value: selectedTournament, name: 'Tournoi' },
+      { value: selectedCategory, name: 'Catégorie' },
+      { value: selectedTemplate, name: 'Modèle de feuille' },
+      { value: selectedPlayers.length > 0, name: 'Joueurs' },
+      { value: selectedCoaches.length > 0, name: 'Entraîneurs' },
+      { value: referentCoach, name: 'Entraîneur référent' }
+    ];
+    
+    const missingFields = requiredFields
+      .filter(field => !field.value)
+      .map(field => field.name);
+    
+    if (missingFields.length > 0) {
+      const missingFieldsText = missingFields.join(', ');
       alert('Veuillez remplir tous les champs obligatoires');
       return;
     }
@@ -94,7 +109,7 @@ const MatchSheetCreate: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tournoi
+                Tournoi *
               </label>
               <select
                 value={selectedTournament}
@@ -113,7 +128,7 @@ const MatchSheetCreate: React.FC = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Catégorie
+                Catégorie *
               </label>
               <select
                 value={selectedCategory}
@@ -134,7 +149,7 @@ const MatchSheetCreate: React.FC = () => {
           {/* Modèle */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Modèle de feuille
+              Modèle de feuille *
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {availableTemplates.map((template) => (
@@ -178,7 +193,7 @@ const MatchSheetCreate: React.FC = () => {
           {/* Joueurs */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Joueurs
+              Joueurs *
             </label>
             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-blue-50 p-3 rounded-lg">
@@ -243,7 +258,7 @@ const MatchSheetCreate: React.FC = () => {
           {/* Entraîneurs */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Entraîneurs
+              Entraîneurs *
             </label>
             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="bg-blue-50 p-3 rounded-lg">
@@ -297,7 +312,7 @@ const MatchSheetCreate: React.FC = () => {
           {/* Entraîneur référent */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Entraîneur référent
+              Entraîneur référent *
             </label>
             <select
               value={referentCoach}
@@ -319,6 +334,7 @@ const MatchSheetCreate: React.FC = () => {
 
           {/* Actions */}
           <div className="flex justify-end space-x-3 pt-6 border-t">
+            <p className="text-sm text-gray-500 mr-auto">* Champs obligatoires</p>
             <button
               type="button"
               disabled={isSubmitting}
