@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Whistle, GraduationCap } from 'lucide-react';
+import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap } from 'lucide-react';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
