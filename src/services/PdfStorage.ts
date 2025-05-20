@@ -51,6 +51,8 @@ export const pdfExists = (filename: string): boolean => {
 export const getPdf = async (filename: string): Promise<string | null> => {
   const normalizedPath = normalizeFilePath(filename);
   
+  console.log(`Tentative de récupération du PDF: ${normalizedPath}`);
+  
   // D'abord, essayer de récupérer depuis le localStorage
   const localPdf = localStorage.getItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`);
   if (localPdf) {
@@ -62,9 +64,43 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${normalizedPath}`);
     
+    // Vérifier si les buckets existent avant de continuer
+    try {
+      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+      
+      if (bucketError) {
+        console.warn(`Erreur lors de la vérification des buckets: ${bucketError.message}`);
+      } else {
+        const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
+        const generatedBucketExists = buckets?.some(b => b.name === GENERATED_BUCKET);
+        
+        console.log(`Bucket "${TEMPLATES_BUCKET}" existe: ${templateBucketExists ? 'Oui' : 'Non'}`);
+        console.log(`Bucket "${GENERATED_BUCKET}" existe: ${generatedBucketExists ? 'Oui' : 'Non'}`);
+        
+        if (!templateBucketExists || !generatedBucketExists) {
+          console.warn(`Un ou plusieurs buckets nécessaires n'existent pas, création en cours...`);
+          
+          // Créer les buckets manquants
+          if (!templateBucketExists) {
+            const { error } = await supabase.storage.createBucket(TEMPLATES_BUCKET, { public: true });
+            if (error) console.warn(`Erreur lors de la création du bucket ${TEMPLATES_BUCKET}:`, error);
+            else console.log(`Bucket ${TEMPLATES_BUCKET} créé avec succès`);
+          }
+          
+          if (!generatedBucketExists) {
+            const { error } = await supabase.storage.createBucket(GENERATED_BUCKET, { public: true });
+            if (error) console.warn(`Erreur lors de la création du bucket ${GENERATED_BUCKET}:`, error);
+            else console.log(`Bucket ${GENERATED_BUCKET} créé avec succès`);
+          }
+        }
+      }
+    } catch (bucketError) {
+      console.warn('Erreur lors de la vérification/création des buckets:', bucketError);
+    }
+    
     // Déterminer le bucket à utiliser en fonction du préfixe ou du path
     const isGenerated = normalizedPath.startsWith('feuille_match_') || 
-                        filename.includes('generated_pdfs');
+                       filename.includes('generated_pdfs');
     const bucketName = isGenerated ? GENERATED_BUCKET : TEMPLATES_BUCKET;
     
     // Définir tous les chemins possibles
@@ -90,7 +126,12 @@ export const getPdf = async (filename: string): Promise<string | null> => {
           .from(bucketName)
           .download(path);
           
-        if (!error && data) {
+        if (error) {
+          console.warn(`Erreur lors de la récupération du PDF (${bucketName}/${path}):`, error);
+          continue; // Try next path
+        }
+          
+        if (data) {
           // Convertir le blob en base64
           const reader = new FileReader();
           return new Promise((resolve) => {
@@ -120,7 +161,12 @@ export const getPdf = async (filename: string): Promise<string | null> => {
           .from(alternateBucket)
           .download(path);
           
-        if (!error && data) {
+        if (error) {
+          console.warn(`Erreur lors de la récupération du PDF (${alternateBucket}/${path}):`, error);
+          continue; // Try next path
+        }
+          
+        if (data) {
           // Convertir le blob en base64
           const reader = new FileReader();
           return new Promise((resolve) => {
@@ -135,12 +181,14 @@ export const getPdf = async (filename: string): Promise<string | null> => {
           });
         }
       } catch (innerError) {
+        console.warn(`Chemin ${alternateBucket}/${path} non trouvé:`, innerError);
         // Continuer avec le prochain chemin
       }
     }
     
-    // Si aucun chemin n'a fonctionné
-    console.error('PDF non trouvé dans Supabase, chemins essayés dans les buckets', TEMPLATES_BUCKET, 'et', GENERATED_BUCKET);
+    // Si aucun chemin n'a fonctionné dans aucun des buckets
+    const errorMsg = `PDF non trouvé dans Supabase, chemins essayés dans les buckets ${TEMPLATES_BUCKET} et ${GENERATED_BUCKET}`;
+    console.error(errorMsg);
     throw new Error(`Fichier PDF non trouvé: ${normalizedPath}`);
   } catch (error) {
     console.error('Erreur lors de la récupération du PDF:', error);
@@ -178,12 +226,25 @@ export const storePdf = async (filename: string, content: string, isGenerated = 
     
     // S'assurer que le bucket existe
     try {
-      const { data: buckets } = await supabase.storage.listBuckets();
-      if (!buckets?.some(b => b.name === bucketName)) {
+      const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+      
+      if (bucketError) {
+        console.warn(`Erreur lors de la vérification des buckets: ${bucketError.message}`);
+      }
+      
+      const bucketExists = buckets?.some(b => b.name === bucketName);
+      
+      if (!bucketExists) {
         console.log(`Le bucket ${bucketName} n'existe pas, tentative de création...`);
-        await supabase.storage.createBucket(bucketName, {
+        const { error } = await supabase.storage.createBucket(bucketName, {
           public: true
         });
+        
+        if (error) {
+          console.warn(`Erreur lors de la création du bucket ${bucketName}:`, error);
+        } else {
+          console.log(`Bucket ${bucketName} créé avec succès`);
+        }
       }
     } catch (error) {
       console.warn(`Erreur lors de la vérification/création du bucket ${bucketName}:`, error);
@@ -238,6 +299,8 @@ export const removePdf = async (filename: string): Promise<boolean> => {
           
         if (!error) {
           console.log(`PDF supprimé avec succès de Supabase (${bucket}/${normalizedPath})`);
+        } else {
+          console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error);
         }
       } catch (error) {
         console.warn(`Erreur lors de la suppression du PDF de ${bucket}:`, error);
@@ -262,20 +325,44 @@ export const listPdfs = async (): Promise<string[]> => {
   }
   
   try {
+    // Vérifier l'existence des buckets
+    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    
+    if (bucketError) {
+      console.warn('Erreur lors de la liste des buckets:', bucketError);
+      return [];
+    }
+    
+    const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
+    
+    if (!templateBucketExists) {
+      console.warn(`Le bucket ${TEMPLATES_BUCKET} n'existe pas pour la liste des PDFs`);
+      return [];
+    }
+    
     // Lister les fichiers à la racine et dans les sous-dossiers possibles
     const paths = ['', 'templates/', 'modeles/'];
     const allFiles: string[] = [];
     
     for (const path of paths) {
-      const { data, error } = await supabase.storage
-        .from(TEMPLATES_BUCKET)
-        .list(path);
-      
-      if (!error && data) {
-        const pdfFiles = data
-          .filter(file => file.name.toLowerCase().endsWith('.pdf'))
-          .map(file => path + file.name);
-        allFiles.push(...pdfFiles);
+      try {
+        const { data, error } = await supabase.storage
+          .from(TEMPLATES_BUCKET)
+          .list(path);
+        
+        if (error) {
+          console.warn(`Erreur lors de la liste des fichiers dans ${TEMPLATES_BUCKET}/${path}:`, error);
+          continue;
+        }
+        
+        if (data) {
+          const pdfFiles = data
+            .filter(file => file.name.toLowerCase().endsWith('.pdf'))
+            .map(file => path + file.name);
+          allFiles.push(...pdfFiles);
+        }
+      } catch (error) {
+        console.warn(`Erreur lors de la liste des fichiers dans ${TEMPLATES_BUCKET}/${path}:`, error);
       }
     }
     
