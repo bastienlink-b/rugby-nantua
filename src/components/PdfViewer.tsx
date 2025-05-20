@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getPdf, createPdfBlobUrl, getPublicUrl } from '../services/PdfStorage';
-import { FileText, AlertCircle } from 'lucide-react';
+import { FileText, AlertCircle, Loader } from 'lucide-react';
 
 interface PdfViewerProps {
   url: string;
@@ -32,21 +32,25 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ url, height = '600px' }) => {
 
       try {
         // Récupérer PDF du stockage (local ou Supabase)
+        console.log(`Tentative de récupération du PDF: ${filename}`);
         const pdfContent = await getPdf(filename);
         
         if (!pdfContent) {
           // Si le PDF n'est pas trouvé localement, essayer d'utiliser l'URL publique Supabase
+          console.log('PDF non trouvé, tentative avec URL publique');
           const publicUrl = getPublicUrl(filename);
           setPdfUrl(publicUrl);
           setLoading(false);
           return;
         }
 
+        console.log('PDF trouvé, création de l\'URL de blob');
         // Create a blob URL for the PDF
         const blobUrl = createPdfBlobUrl(pdfContent);
         setPdfUrl(blobUrl);
         setLoading(false);
       } catch (err) {
+        console.error('Erreur lors de la création de l\'URL du PDF:', err);
         setError('Erreur lors de la création de l\'URL du PDF');
         setLoading(false);
       }
@@ -59,8 +63,16 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ url, height = '600px' }) => {
       setLoading(false);
     };
 
-    // Check if the URL is local or external
-    if (url.startsWith('/templates/')) {
+    // Function to handle data URIs
+    const handleDataUri = () => {
+      setPdfUrl(url);
+      setLoading(false);
+    };
+
+    // Check what kind of URL we're dealing with
+    if (url.startsWith('data:')) {
+      handleDataUri();
+    } else if (url.startsWith('/templates/') || url.startsWith('/generated_pdfs/')) {
       handleLocalPdf();
     } else {
       handleExternalPdf();
@@ -77,7 +89,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ url, height = '600px' }) => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-40 bg-gray-100 rounded-md">
-        <div className="text-gray-500">Chargement du PDF...</div>
+        <div className="text-gray-500 flex items-center">
+          <Loader size={16} className="mr-2 animate-spin" />
+          Chargement du PDF...
+        </div>
       </div>
     );
   }

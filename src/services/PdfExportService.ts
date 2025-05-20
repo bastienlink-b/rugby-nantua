@@ -77,6 +77,7 @@ export const generateAndStorePdf = async (
   tournament: Tournament
 ): Promise<string> => {
   try {
+    console.log("Début de la génération du PDF...");
     // Génération du PDF
     const pdfBytes = await generatePdf({
       templateId,
@@ -88,6 +89,7 @@ export const generateAndStorePdf = async (
       tournament
     });
     
+    console.log("PDF généré avec succès, conversion en Base64...");
     // Conversion en Base64
     const pdfBase64 = btoa(
       Array.from(new Uint8Array(pdfBytes))
@@ -99,6 +101,7 @@ export const generateAndStorePdf = async (
     const timestamp = Date.now();
     const filename = `feuille_match_${tournament.location.replace(/\s+/g, '_')}_${tournament.date}_${timestamp}.pdf`;
     
+    console.log(`Stockage du PDF généré sous: ${filename}`);
     // Stocker le PDF dans Supabase
     const pdfDataUri = `data:application/pdf;base64,${pdfBase64}`;
     await storePdf(filename, pdfDataUri, true);

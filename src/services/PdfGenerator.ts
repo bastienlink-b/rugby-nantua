@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, PDFForm, PDFTextField, PDFCheckBox } from 'pdf-lib';
 import { Tournament, Player, Coach, Template, PdfFieldMapping } from '../types';
 import { getPdf } from './PdfStorage';
 
@@ -49,6 +49,8 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
     throw new Error('Nom de fichier du template non valide');
   }
 
+  console.log(`Chargement du modèle PDF: ${templateFileName}`);
+
   // Récupération du contenu du PDF depuis le stockage local ou Supabase
   const pdfContent = await getPdf(templateFileName);
   
@@ -63,13 +65,11 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
   // Chargement du PDF
   const pdfDoc = await PDFDocument.load(pdfBytes);
   
-  // Intégration de la police
-  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const pages = pdfDoc.getPages();
-  
-  if (pages.length === 0) {
-    throw new Error('Le PDF ne contient aucune page');
-  }
+  // Vérifier si le PDF a un formulaire
+  const form = pdfDoc.getForm();
+  const fields = form.getFields();
+
+  console.log(`Le PDF contient ${fields.length} champs de formulaire`);
   
   // Préparation des données à insérer dans le PDF
   const data: PdfData = {
@@ -86,22 +86,338 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
     educateurs: coaches.map(coach => ({
       nom: coach.lastName,
       prenom: coach.firstName,
-      licence: coach.licenseNumber,
+      licence: coach.licenseNumber || '',
       diplome: coach.diploma,
       est_referent: coach.id === referentCoachId
     }))
   };
-  
-  // Si le template contient des mappings de champs, les utiliser pour positionner le texte
-  if (template.fieldMappings && template.fieldMappings.length > 0) {
-    applyFieldMappings(pages, helveticaFont, data, template.fieldMappings);
+
+  if (fields.length > 0) {
+    // Si le PDF a des champs de formulaire, remplir ces champs
+    console.log("PDF avec formulaire détecté, remplissage des champs...");
+    fillFormFields(form, data, template.fieldMappings || []);
   } else {
-    // Fallback: utilisation de positions par défaut si aucun mapping n'est défini
-    applyDefaultPositions(pages[0], helveticaFont, data);
+    console.log("Aucun champ de formulaire détecté, dessin du texte sur le PDF...");
+    
+    // Si le template contient des mappings de champs, les utiliser pour positionner le texte
+    if (template.fieldMappings && template.fieldMappings.length > 0) {
+      console.log(`Utilisation de ${template.fieldMappings.length} mappings de champs pour le positionnement du texte`);
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const pages = pdfDoc.getPages();
+      applyFieldMappings(pages, helveticaFont, data, template.fieldMappings);
+    } else {
+      // Fallback: utilisation de positions par défaut si aucun mapping n'est défini
+      console.log("Aucun mapping défini, utilisation de positions par défaut");
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const pages = pdfDoc.getPages();
+      applyDefaultPositions(pages[0], helveticaFont, data);
+    }
   }
+
+  // Aplatir le formulaire pour rendre les champs remplis non modifiables
+  form.flatten();
 
   // Enregistrement du PDF modifié
   return pdfDoc.save();
+};
+
+/**
+ * Remplit les champs d'un formulaire PDF avec les données fournies
+ * @param form Formulaire PDF
+ * @param data Données à insérer
+ * @param fieldMappings Mappings des champs (optionnel)
+ */
+const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMapping[]) => {
+  // Loggez les noms de tous les champs pour le débogage
+  const fieldNames = form.getFields().map(field => field.getName());
+  console.log("Champs disponibles dans le formulaire:", fieldNames);
+  
+  try {
+    // Si des mappings sont fournis, les utiliser pour remplir les champs
+    if (fieldMappings.length > 0) {
+      console.log("Utilisation des mappings de champs pour le remplissage");
+      
+      // Mappings pour les champs globaux
+      fieldMappings
+        .filter(mapping => mapping.type === 'global')
+        .forEach(mapping => {
+          try {
+            const value = getValueFromMapping(mapping.mapping, data);
+            if (value !== null && value !== undefined) {
+              fillField(form, mapping.champ_pdf, value);
+            }
+          } catch (error) {
+            console.warn(`Erreur lors du remplissage du champ ${mapping.champ_pdf}:`, error);
+          }
+        });
+      
+      // Mappings pour les joueurs
+      data.joueurs.forEach((joueur, index) => {
+        fieldMappings
+          .filter(mapping => mapping.type === 'joueur')
+          .forEach(mapping => {
+            try {
+              let value = null;
+              
+              if (mapping.mapping.includes('nom')) value = joueur.nom;
+              else if (mapping.mapping.includes('prenom')) value = joueur.prenom;
+              else if (mapping.mapping.includes('licence')) value = joueur.licence;
+              else if (mapping.mapping.includes('avant')) value = joueur.est_avant;
+              else if (mapping.mapping.includes('arbitre')) value = joueur.est_arbitre;
+              
+              if (value !== null && value !== undefined) {
+                // Utiliser la position du joueur pour construire le nom du champ
+                // Par exemple, si le champ est "joueurNom", utilisez "joueurNom1", "joueurNom2", etc.
+                const fieldName = `${mapping.champ_pdf}${index + 1}`;
+                fillField(form, fieldName, value);
+                
+                // Essayer aussi avec un format alternatif, par exemple "joueur[1].nom"
+                const altFieldName = mapping.champ_pdf.replace('[n]', `[${index + 1}]`);
+                if (altFieldName !== mapping.champ_pdf) {
+                  fillField(form, altFieldName, value);
+                }
+              }
+            } catch (error) {
+              console.warn(`Erreur lors du remplissage du champ joueur ${mapping.champ_pdf}:`, error);
+            }
+          });
+      });
+      
+      // Mappings pour les éducateurs
+      data.educateurs.forEach((educateur, index) => {
+        fieldMappings
+          .filter(mapping => mapping.type === 'educateur')
+          .forEach(mapping => {
+            try {
+              let value = null;
+              
+              if (mapping.mapping.includes('nom')) value = educateur.nom;
+              else if (mapping.mapping.includes('prenom')) value = educateur.prenom;
+              else if (mapping.mapping.includes('licence')) value = educateur.licence;
+              else if (mapping.mapping.includes('diplome')) value = educateur.diplome;
+              else if (mapping.mapping.includes('referent')) value = educateur.est_referent;
+              
+              if (value !== null && value !== undefined) {
+                // Utiliser la position de l'éducateur pour construire le nom du champ
+                const fieldName = `${mapping.champ_pdf}${index + 1}`;
+                fillField(form, fieldName, value);
+                
+                // Essayer aussi avec un format alternatif
+                const altFieldName = mapping.champ_pdf.replace('[n]', `[${index + 1}]`);
+                if (altFieldName !== mapping.champ_pdf) {
+                  fillField(form, altFieldName, value);
+                }
+              }
+            } catch (error) {
+              console.warn(`Erreur lors du remplissage du champ éducateur ${mapping.champ_pdf}:`, error);
+            }
+          });
+      });
+      
+    } else {
+      // Si aucun mapping n'est fourni, essayer de détecter et remplir les champs communs
+      console.log("Aucun mapping fourni, tentative de remplissage automatique des champs communs");
+      autoFillFormFields(form, data);
+    }
+  } catch (error) {
+    console.error("Erreur lors du remplissage du formulaire:", error);
+  }
+};
+
+/**
+ * Remplit un champ de formulaire avec une valeur donnée
+ * @param form Formulaire PDF
+ * @param fieldName Nom du champ
+ * @param value Valeur à insérer
+ */
+const fillField = (form: PDFForm, fieldName: string, value: any) => {
+  try {
+    // Check if the field exists
+    const field = form.getFields().find(f => f.getName() === fieldName);
+    if (!field) {
+      // console.warn(`Champ ${fieldName} non trouvé dans le formulaire`);
+      return;
+    }
+
+    // Handle different field types
+    if (field.constructor.name === 'PDFTextField') {
+      const textValue = typeof value === 'boolean' 
+        ? (value ? 'Oui' : 'Non')
+        : String(value);
+      form.getTextField(fieldName).setText(textValue);
+      console.log(`Champ texte ${fieldName} rempli avec: ${textValue}`);
+    } else if (field.constructor.name === 'PDFCheckBox') {
+      if (typeof value === 'boolean') {
+        if (value) {
+          form.getCheckBox(fieldName).check();
+        } else {
+          form.getCheckBox(fieldName).uncheck();
+        }
+      } else if (typeof value === 'string') {
+        const boolValue = value.toLowerCase() === 'true' || value.toLowerCase() === 'oui';
+        if (boolValue) {
+          form.getCheckBox(fieldName).check();
+        } else {
+          form.getCheckBox(fieldName).uncheck();
+        }
+      }
+      console.log(`Case à cocher ${fieldName} définie à: ${!!value}`);
+    } else if (field.constructor.name === 'PDFDropdown') {
+      const dropdownField = form.getDropdown(fieldName);
+      const options = dropdownField.getOptions();
+      const stringValue = String(value);
+      
+      if (options.includes(stringValue)) {
+        dropdownField.select(stringValue);
+      } else {
+        console.warn(`Valeur ${value} non trouvée dans les options de la liste déroulante ${fieldName}`);
+      }
+    } else {
+      console.warn(`Type de champ non supporté pour ${fieldName}: ${field.constructor.name}`);
+    }
+  } catch (error) {
+    console.warn(`Erreur lors du remplissage du champ ${fieldName}:`, error);
+  }
+};
+
+/**
+ * Tente automatiquement de remplir les champs communs d'un formulaire PDF
+ * @param form Formulaire PDF
+ * @param data Données à insérer
+ */
+const autoFillFormFields = (form: PDFForm, data: PdfData) => {
+  const fields = form.getFields();
+  
+  // Map of common field names to their values
+  const commonFieldMappings: Record<string, any> = {
+    // Event details
+    'tournoi': data.nom_manifestation,
+    'manifestation': data.nom_manifestation,
+    'evenement': data.nom_manifestation,
+    'date': data.date_manifestation,
+    'lieu': data.lieu_manifestation,
+    'location': data.lieu_manifestation,
+    
+    // Tournament details
+    'club': data.club,
+    'categorie': data.categorie,
+    'category': data.categorie,
+  };
+  
+  // Try to fill in fields based on their names
+  fields.forEach(field => {
+    const fieldName = field.getName();
+    const lowerFieldName = fieldName.toLowerCase();
+    
+    // Check for direct matches in our mapping
+    for (const [key, value] of Object.entries(commonFieldMappings)) {
+      if (value && (lowerFieldName === key || lowerFieldName.includes(key))) {
+        try {
+          fillField(form, fieldName, value);
+        } catch (error) {
+          console.warn(`Erreur lors du remplissage automatique du champ ${fieldName}:`, error);
+        }
+      }
+    }
+    
+    // Check for players
+    if (lowerFieldName.includes('joueur') || lowerFieldName.includes('player')) {
+      tryFillPlayerField(form, field, data.joueurs);
+    }
+    
+    // Check for coaches
+    if (lowerFieldName.includes('educateur') || 
+        lowerFieldName.includes('entraineur') || 
+        lowerFieldName.includes('coach')) {
+      tryFillCoachField(form, field, data.educateurs);
+    }
+  });
+};
+
+/**
+ * Tente de remplir un champ de joueur en fonction de son nom
+ */
+const tryFillPlayerField = (form: PDFForm, field: PDFField, players: PdfData['joueurs']) => {
+  const fieldName = field.getName().toLowerCase();
+  
+  // Extract player index from field name if present
+  const indexMatch = fieldName.match(/(\d+)/);
+  const playerIndex = indexMatch ? parseInt(indexMatch[1], 10) - 1 : -1;
+  
+  // If we have a specific player index and it exists in our data
+  if (playerIndex >= 0 && playerIndex < players.length) {
+    const player = players[playerIndex];
+    
+    // Determine what type of player data this field contains
+    if (fieldName.includes('nom')) {
+      fillField(form, field.getName(), player.nom);
+    } else if (fieldName.includes('prenom')) {
+      fillField(form, field.getName(), player.prenom);
+    } else if (fieldName.includes('licence')) {
+      fillField(form, field.getName(), player.licence);
+    } else if (fieldName.includes('avant')) {
+      fillField(form, field.getName(), player.est_avant);
+    } else if (fieldName.includes('arbitre')) {
+      fillField(form, field.getName(), player.est_arbitre);
+    }
+  }
+  // If no specific index but it's a multi-player field
+  else if (playerIndex === -1) {
+    // It could be a field for multiple players (less common)
+    if (field instanceof PDFTextField) {
+      if (fieldName.includes('joueurs') || fieldName.includes('players')) {
+        const playerText = players.map(p => `${p.nom} ${p.prenom}`).join('\n');
+        fillField(form, field.getName(), playerText);
+      }
+    }
+  }
+};
+
+/**
+ * Tente de remplir un champ d'entraîneur en fonction de son nom
+ */
+const tryFillCoachField = (form: PDFForm, field: PDFField, coaches: PdfData['educateurs']) => {
+  const fieldName = field.getName().toLowerCase();
+  
+  // Extract coach index from field name if present
+  const indexMatch = fieldName.match(/(\d+)/);
+  const coachIndex = indexMatch ? parseInt(indexMatch[1], 10) - 1 : -1;
+  
+  // If we have a specific coach index and it exists in our data
+  if (coachIndex >= 0 && coachIndex < coaches.length) {
+    const coach = coaches[coachIndex];
+    
+    // Determine what type of coach data this field contains
+    if (fieldName.includes('nom')) {
+      fillField(form, field.getName(), coach.nom);
+    } else if (fieldName.includes('prenom')) {
+      fillField(form, field.getName(), coach.prenom);
+    } else if (fieldName.includes('licence')) {
+      fillField(form, field.getName(), coach.licence);
+    } else if (fieldName.includes('diplome')) {
+      fillField(form, field.getName(), coach.diplome);
+    } else if (fieldName.includes('referent')) {
+      fillField(form, field.getName(), coach.est_referent);
+    }
+  }
+  // If no specific index but it's a multi-coach field
+  else if (coachIndex === -1) {
+    // It could be a field for multiple coaches (less common)
+    if (field instanceof PDFTextField) {
+      if (fieldName.includes('educateurs') || fieldName.includes('coaches')) {
+        const coachText = coaches.map(c => `${c.nom} ${c.prenom}`).join('\n');
+        fillField(form, field.getName(), coachText);
+      }
+      
+      // Special case for the referent coach
+      if (fieldName.includes('referent')) {
+        const referentCoach = coaches.find(c => c.est_referent);
+        if (referentCoach) {
+          fillField(form, field.getName(), `${referentCoach.nom} ${referentCoach.prenom}`);
+        }
+      }
+    }
+  }
 };
 
 /**
@@ -415,3 +731,4 @@ const extractCoordinates = (fieldDescription: string): { x: number, y: number, p
 // Types nécessaires pour TypeScript
 type PDFPage = ReturnType<typeof PDFDocument.prototype.getPages>[0];
 type PDFFont = Awaited<ReturnType<typeof PDFDocument.prototype.embedFont>>;
+type PDFField = PDFTextField | PDFCheckBox | ReturnType<typeof PDFForm.prototype.getFields>[0];
