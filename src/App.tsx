@@ -7,6 +7,7 @@ import Coaches from './pages/Coaches';
 import Tournaments from './pages/Tournaments';
 import Calendar from './pages/Calendar';
 import MatchSheets from './pages/MatchSheets';
+import MatchSheetCreate from './pages/MatchSheetCreate';
 import Templates from './pages/Templates';
 import { AppProvider } from './context/AppContext';
 
