@@ -22,7 +22,10 @@ function App() {
             <Route path="tournaments" element={<Tournaments />} />
             <Route path="calendar" element={<Calendar />} />
             <Route path="templates" element={<Templates />} />
-            <Route path="match-sheets" element={<MatchSheets />} />
+            <Route path="match-sheets">
+              <Route index element={<MatchSheets />} />
+              <Route path="create" element={<MatchSheetCreate />} />
+            </Route>
           </Route>
         </Routes>
       </Router>
