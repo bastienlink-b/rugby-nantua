@@ -86,16 +86,50 @@ const Coaches: React.FC = () => {
     }
   };
 
-  const filteredCoaches = coaches.filter((coach) =>
+  // Trier les entraîneurs par ordre alphabétique du nom de famille
+  const sortedCoaches = [...coaches].sort((a, b) => 
+    a.lastName.localeCompare(b.lastName, 'fr-FR')
+  );
+
+  // Trier les catégories d'âge dans l'ordre spécifique (M6, M8, M10, etc.)
+  const sortedCategories = [...ageCategories].sort((a, b) => {
+    // Extraire le numéro de la catégorie (ex: M6 -> 6)
+    const getAgeNumber = (name: string) => {
+      const match = name.match(/M(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    
+    const ageA = getAgeNumber(a.name);
+    const ageB = getAgeNumber(b.name);
+    
+    return ageA - ageB;
+  });
+
+  const filteredCoaches = sortedCoaches.filter((coach) =>
     coach.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     coach.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     coach.licenseNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const getCategoryNames = (categoryIds: string[]) => {
-    return categoryIds.map(id => 
-      ageCategories.find(cat => cat.id === id)?.name || 'Inconnu'
-    ).join(', ');
+    return categoryIds
+      .map(id => {
+        const category = ageCategories.find(cat => cat.id === id);
+        return category?.name || 'Inconnu';
+      })
+      .sort((a, b) => {
+        // Extraire le numéro de la catégorie (ex: M6 -> 6)
+        const getAgeNumber = (name: string) => {
+          const match = name.match(/M(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        };
+        
+        const ageA = getAgeNumber(a);
+        const ageB = getAgeNumber(b);
+        
+        return ageA - ageB;
+      })
+      .join(', ');
   };
 
   return (
@@ -318,7 +352,7 @@ const Coaches: React.FC = () => {
                     Catégories d'âge (au moins une)
                   </label>
                   <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
-                    {ageCategories.map((category) => (
+                    {sortedCategories.map((category) => (
                       <label key={category.id} className="flex items-center">
                         <input
                           type="checkbox"

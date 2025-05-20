@@ -75,16 +75,33 @@ const Players: React.FC = () => {
     }
   };
 
-  const filteredPlayers = players.filter(player => {
-    const matchesSearch = 
-      player.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.licenseNumber.toLowerCase().includes(searchTerm.toLowerCase());
+  // Trier les catégories d'âge dans l'ordre spécifique (M6, M8, M10, etc.)
+  const sortedCategories = [...ageCategories].sort((a, b) => {
+    // Extraire le numéro de la catégorie (ex: M6 -> 6)
+    const getAgeNumber = (name: string) => {
+      const match = name.match(/M(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
     
-    const matchesCategory = selectedCategory ? player.ageCategoryId === selectedCategory : true;
+    const ageA = getAgeNumber(a.name);
+    const ageB = getAgeNumber(b.name);
     
-    return matchesSearch && matchesCategory;
+    return ageA - ageB;
   });
+
+  // Appliquer les filtres et tri par nom de famille
+  const filteredPlayers = players
+    .filter(player => {
+      const matchesSearch = 
+        player.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        player.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        player.licenseNumber.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesCategory = selectedCategory ? player.ageCategoryId === selectedCategory : true;
+      
+      return matchesSearch && matchesCategory;
+    })
+    .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr-FR')); // Tri alphabétique par nom
 
   return (
     <div>
@@ -127,7 +144,7 @@ const Players: React.FC = () => {
             onChange={(e) => setSelectedCategory(e.target.value)}
           >
             <option value="">Toutes catégories</option>
-            {ageCategories.map((category) => (
+            {sortedCategories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
               </option>
@@ -344,7 +361,7 @@ const Players: React.FC = () => {
                     className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="" disabled>Sélectionner une catégorie</option>
-                    {ageCategories.map((category) => (
+                    {sortedCategories.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.name} - {category.description}
                       </option>

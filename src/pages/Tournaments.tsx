@@ -87,15 +87,59 @@ const Tournaments: React.FC = () => {
     }
   };
 
-  const filteredTournaments = tournaments.filter(tournament =>
+  // Tri des catégories d'âge dans l'ordre spécifique (M6, M8, M10, etc.)
+  const sortedCategories = [...ageCategories].sort((a, b) => {
+    // Extraire le numéro de la catégorie (ex: M6 -> 6)
+    const getAgeNumber = (name: string) => {
+      const match = name.match(/M(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    
+    const ageA = getAgeNumber(a.name);
+    const ageB = getAgeNumber(b.name);
+    
+    return ageA - ageB;
+  });
+
+  // Trier les tournois par date (ordre descendant) et location
+  const sortedTournaments = [...tournaments]
+    .sort((a, b) => {
+      // D'abord par date (du plus récent au plus ancien)
+      const dateComparison = new Date(b.date).getTime() - new Date(a.date).getTime();
+      
+      // Si même date, trier par lieu
+      if (dateComparison === 0) {
+        return a.location.localeCompare(b.location, 'fr-FR');
+      }
+      
+      return dateComparison;
+    });
+
+  const filteredTournaments = sortedTournaments.filter(tournament =>
     tournament.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
     new Date(tournament.date).toLocaleDateString().includes(searchTerm)
   );
 
   const getCategoryNames = (categoryIds: string[]) => {
-    return categoryIds.map(id => 
-      ageCategories.find(cat => cat.id === id)?.name || 'Inconnu'
-    ).join(', ');
+    return categoryIds
+      .map(id => ageCategories.find(cat => cat.id === id))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (!a || !b) return 0;
+        
+        // Extraire le numéro de la catégorie (ex: M6 -> 6)
+        const getAgeNumber = (name: string) => {
+          const match = name.match(/M(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        };
+        
+        const ageA = getAgeNumber(a.name);
+        const ageB = getAgeNumber(b.name);
+        
+        return ageA - ageB;
+      })
+      .map(cat => cat?.name || 'Inconnu')
+      .join(', ');
   };
 
   return (
@@ -266,7 +310,7 @@ const Tournaments: React.FC = () => {
                     Catégories d'âge (au moins une)
                   </label>
                   <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
-                    {ageCategories.map((category) => (
+                    {sortedCategories.map((category) => (
                       <label key={category.id} className="flex items-center">
                         <input
                           type="checkbox"

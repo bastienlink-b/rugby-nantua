@@ -21,6 +21,20 @@ const MatchSheetCreate: React.FC = () => {
   const [editId, setEditId] = useState<string | null>(null);
   const [existingPdfUrl, setExistingPdfUrl] = useState<string | null>(null);
 
+  // Tri des catégories d'âge dans l'ordre spécifique (M6, M8, M10, etc.)
+  const sortedCategories = [...ageCategories].sort((a, b) => {
+    // Extraire le numéro de la catégorie (ex: M6 -> 6)
+    const getAgeNumber = (name: string) => {
+      const match = name.match(/M(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+    
+    const ageA = getAgeNumber(a.name);
+    const ageB = getAgeNumber(b.name);
+    
+    return ageA - ageB;
+  });
+
   // Check if in edit mode
   useEffect(() => {
     // Extract matchSheetId from search parameters or location state
@@ -51,17 +65,21 @@ const MatchSheetCreate: React.FC = () => {
   // Filter templates by selected category
   const availableTemplates = templates.filter(template => 
     !selectedCategory || template.ageCategoryIds.includes(selectedCategory)
-  );
+  ).sort((a, b) => a.name.localeCompare(b.name, 'fr-FR'));
 
-  // Filter players by selected category
-  const availablePlayers = players.filter(player => 
-    !selectedCategory || player.ageCategoryId === selectedCategory
-  );
+  // Filter players by selected category and sort alphabetically
+  const availablePlayers = players
+    .filter(player => 
+      !selectedCategory || player.ageCategoryId === selectedCategory
+    )
+    .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr-FR'));
 
-  // Filter coaches by selected category
-  const availableCoaches = coaches.filter(coach => 
-    !selectedCategory || coach.ageCategoryIds.includes(selectedCategory)
-  );
+  // Filter coaches by selected category and sort alphabetically
+  const availableCoaches = coaches
+    .filter(coach => 
+      !selectedCategory || coach.ageCategoryIds.includes(selectedCategory)
+    )
+    .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr-FR'));
 
   // Set initial category based on tournament if available
   useEffect(() => {
@@ -202,7 +220,7 @@ const MatchSheetCreate: React.FC = () => {
                 className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Sélectionner une catégorie</option>
-                {ageCategories.map((category) => (
+                {sortedCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name} - {category.description}
                   </option>
@@ -312,7 +330,7 @@ const MatchSheetCreate: React.FC = () => {
                     />
                     <Users size={16} className="ml-2 mr-1 text-gray-400" />
                     <span className="ml-2 text-sm">
-                      {player.firstName} {player.lastName}
+                      {player.lastName} {player.firstName}
                     </span>
                   </label>
                 ))}
@@ -366,7 +384,7 @@ const MatchSheetCreate: React.FC = () => {
                     />
                     <Award size={16} className="ml-2 mr-1 text-gray-400" />
                     <span className="ml-2 text-sm">
-                      {coach.firstName} {coach.lastName}
+                      {coach.lastName} {coach.firstName}
                     </span>
                   </label>
                 ))}
@@ -386,14 +404,15 @@ const MatchSheetCreate: React.FC = () => {
               className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">Sélectionner un entraîneur référent</option>
-              {selectedCoaches.map((coachId) => {
-                const coach = coaches.find(c => c.id === coachId);
-                return coach ? (
+              {selectedCoaches
+                .map(coachId => coaches.find(c => c.id === coachId))
+                .filter(Boolean)
+                .sort((a, b) => a!.lastName.localeCompare(b!.lastName, 'fr-FR'))
+                .map(coach => coach && (
                   <option key={coach.id} value={coach.id}>
-                    {coach.firstName} {coach.lastName}
+                    {coach.lastName} {coach.firstName}
                   </option>
-                ) : null;
-              })}
+                ))}
             </select>
           </div>
 

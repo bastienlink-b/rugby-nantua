@@ -239,7 +239,12 @@ const Templates: React.FC = () => {
     deleteTemplate(id);
   };
 
-  const filteredTemplates = templates.filter(template => {
+  // Tri des templates par nom alphabétique
+  const sortedTemplates = [...templates].sort((a, b) => 
+    a.name.localeCompare(b.name, 'fr-FR')
+  );
+
+  const filteredTemplates = sortedTemplates.filter(template => {
     const matchesSearch = 
       template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (template.description && template.description.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -259,7 +264,23 @@ const Templates: React.FC = () => {
     const ids = Array.isArray(categoryIds) ? categoryIds : [categoryIds].filter(Boolean);
     
     return ids
-      .map(id => ageCategories.find(cat => cat.id === id)?.name || 'Non définie')
+      .map(id => ageCategories.find(cat => cat.id === id))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (!a || !b) return 0;
+        
+        // Extraire le numéro de la catégorie (ex: M6 -> 6)
+        const getAgeNumber = (name: string) => {
+          const match = name.match(/M(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        };
+        
+        const ageA = getAgeNumber(a.name);
+        const ageB = getAgeNumber(b.name);
+        
+        return ageA - ageB;
+      })
+      .map(cat => cat?.name || 'Non définie')
       .join(', ');
   };
 
