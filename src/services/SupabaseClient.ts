@@ -15,6 +15,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
 // Name of the storage bucket for PDF templates
 export const TEMPLATES_BUCKET = 'modeles';
+// Bucket for generated PDFs
+export const GENERATED_BUCKET = 'generated_pdfs';
 
 // Function to initialize storage
 export const initializeStorage = async () => {
@@ -29,60 +31,58 @@ export const initializeStorage = async () => {
       console.log('Utilisateur authentifié. Session active.');
     }
 
-    console.log('Vérification de l\'accès au bucket:', TEMPLATES_BUCKET);
+    console.log('Vérification de l\'accès aux buckets:', TEMPLATES_BUCKET, 'et', GENERATED_BUCKET);
     
-    // Check if we can access the bucket directly
-    try {
-      const { data: fileList, error: fileListError } = await supabase.storage
-        .from(TEMPLATES_BUCKET)
-        .list();
-        
-      if (fileListError) {
-        // Amélioration de la détection des erreurs RLS
-        if (fileListError.message?.includes('policy') || fileListError.message?.includes('Unauthorized') || 
-            fileListError.status === 403 || fileListError.status === 400) {
-          console.warn(`Erreur RLS: Accès non autorisé au bucket ${TEMPLATES_BUCKET}. Utilisation du stockage local uniquement.`);
-          console.log('Assurez-vous que les politiques RLS sont correctement configurées dans Supabase.');
-          console.log('Vérifiez que l\'utilisateur a des autorisations suffisantes pour accéder au bucket.');
-          return; // Sortir tôt en cas d'erreur RLS
+    // Vérifier l'existence et l'accès aux buckets
+    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    
+    if (bucketError) {
+      console.warn('Erreur lors de la liste des buckets:', bucketError);
+    } else {
+      console.log('Buckets disponibles:', buckets?.map(b => b.name) || []);
+      
+      // Vérifier si les buckets nécessaires existent
+      const templateBucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
+      const generatedBucketExists = buckets?.some(b => b.name === GENERATED_BUCKET);
+      
+      console.log(`Le bucket ${TEMPLATES_BUCKET} existe: ${templateBucketExists ? 'Oui' : 'Non'}`);
+      console.log(`Le bucket ${GENERATED_BUCKET} existe: ${generatedBucketExists ? 'Oui' : 'Non'}`);
+      
+      // Essayer de créer les buckets manquants si on a les droits
+      if (!templateBucketExists) {
+        try {
+          console.log(`Tentative de création du bucket ${TEMPLATES_BUCKET}...`);
+          await supabase.storage.createBucket(TEMPLATES_BUCKET, { public: true });
+          console.log(`Bucket ${TEMPLATES_BUCKET} créé avec succès!`);
+        } catch (error) {
+          console.warn(`Impossible de créer le bucket ${TEMPLATES_BUCKET}:`, error);
         }
-        
-        // Try to list the root folder (works with or without creating the bucket)
-        console.log('Tentative de liste des buckets disponibles...');
-        const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-        
-        if (bucketsError) {
-          // Amélioration de la détection des erreurs RLS
-          if (bucketsError.message?.includes('policy') || bucketsError.message?.includes('Unauthorized') || 
-              bucketsError.status === 403 || bucketsError.status === 400) {
-            console.warn('Erreur RLS: Accès non autorisé pour lister les buckets. Utilisation du stockage local uniquement.');
-            return; // Sortir tôt en cas d'erreur RLS
-          } else {
-            console.warn('Erreur lors de la liste des buckets:', bucketsError);
-          }
-        } else {
-          console.log('Buckets disponibles:', buckets?.map(b => b.name) || []);
-          
-          // Check if our target bucket exists
-          const bucketExists = buckets?.some(b => b.name === TEMPLATES_BUCKET);
-          console.log(`Le bucket ${TEMPLATES_BUCKET} existe: ${bucketExists ? 'Oui' : 'Non'}`);
-          
-          if (!bucketExists) {
-            console.log(`Le bucket ${TEMPLATES_BUCKET} n'existe pas. Les PDFs seront stockés localement uniquement.`);
-            console.log('Les utilisateurs avec des privilèges d\'administrateur peuvent créer ce bucket dans la console Supabase.');
-          }
-        }
-      } else {
-        console.log(`Accès réussi au bucket ${TEMPLATES_BUCKET}. Fichiers disponibles:`, 
-          fileList?.map(f => f.name) || []);
       }
-    } catch (error) {
-      console.warn('Erreur inattendue lors de l\'accès au bucket:', error);
-      console.log('Les PDFs seront stockés localement uniquement.');
+      
+      if (!generatedBucketExists) {
+        try {
+          console.log(`Tentative de création du bucket ${GENERATED_BUCKET}...`);
+          await supabase.storage.createBucket(GENERATED_BUCKET, { public: true });
+          console.log(`Bucket ${GENERATED_BUCKET} créé avec succès!`);
+        } catch (error) {
+          console.warn(`Impossible de créer le bucket ${GENERATED_BUCKET}:`, error);
+        }
+      }
     }
     
-    // We don't attempt to create buckets anymore as it requires admin privileges
-    // Instead, we just adapt to work with what's available
+    // Vérifier l'accès aux buckets individuellement
+    for (const bucket of [TEMPLATES_BUCKET, GENERATED_BUCKET]) {
+      try {
+        const { data, error } = await supabase.storage.from(bucket).list();
+        if (error) {
+          console.warn(`Erreur lors de l'accès au bucket ${bucket}:`, error);
+        } else {
+          console.log(`Accès réussi au bucket ${bucket}. Fichiers disponibles:`, data?.length || 0);
+        }
+      } catch (error) {
+        console.warn(`Erreur inattendue lors de l'accès au bucket ${bucket}:`, error);
+      }
+    }
     
   } catch (error) {
     console.error('Erreur d\'initialisation du stockage:', error);

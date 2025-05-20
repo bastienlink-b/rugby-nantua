@@ -4,12 +4,10 @@
  */
 
 import { PDFDocument, PDFField, PDFForm } from 'pdf-lib';
-import { supabase, TEMPLATES_BUCKET } from './SupabaseClient';
+import { supabase, TEMPLATES_BUCKET, GENERATED_BUCKET } from './SupabaseClient';
 
 // Préfixe utilisé pour stocker les fichiers dans le localStorage
 const PDF_STORAGE_PREFIX = 'pdf_';
-// Bucket pour les PDFs générés
-const GENERATED_BUCKET = 'generated_pdfs';
 
 /**
  * Nettoie et normalise le chemin du fichier

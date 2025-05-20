@@ -214,22 +214,6 @@ const MatchSheets: React.FC = () => {
     return matchesSearch && matchesTournament;
   });
 
-  // Find and delete the Gex match sheet on component mount if it exists
-  useEffect(() => {
-    const deleteGexMatchSheet = async () => {
-      const gexSheet = matchSheets.find(sheet => {
-        const tournament = tournaments.find(t => t.id === sheet.tournamentId);
-        return tournament && tournament.location === "Gex";
-      });
-      
-      if (gexSheet) {
-        await handleDeleteMatchSheet(gexSheet.id, "Gex");
-      }
-    };
-    
-    deleteGexMatchSheet();
-  }, [matchSheets, tournaments]);
-
   return (
     <div>
       <div className="mb-6 flex justify-between items-center">

@@ -101,7 +101,7 @@ export const generateAndStorePdf = async (
     
     // Stocker le PDF dans Supabase
     const pdfDataUri = `data:application/pdf;base64,${pdfBase64}`;
-    await storePdf(filename, pdfDataUri);
+    await storePdf(filename, pdfDataUri, true);
     
     console.log(`PDF généré et stocké avec succès: ${filename}`);
     
