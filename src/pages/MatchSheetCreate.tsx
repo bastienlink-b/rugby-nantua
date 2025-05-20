@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Users, Award } from 'lucide-react';
+import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Whistle, GraduationCap } from 'lucide-react';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
@@ -154,6 +154,37 @@ const MatchSheetCreate: React.FC = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Joueurs
             </label>
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <div className="flex items-center text-blue-700 mb-1">
+                  <UserCheck size={16} className="mr-1" />
+                  <span className="text-sm font-medium">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-900">{selectedPlayers.length}</p>
+              </div>
+              <div className="bg-green-50 p-3 rounded-lg">
+                <div className="flex items-center text-green-700 mb-1">
+                  <ShieldCheck size={16} className="mr-1" />
+                  <span className="text-sm font-medium">Avants</span>
+                </div>
+                <p className="text-2xl font-bold text-green-900">
+                  {selectedPlayers.filter(id => 
+                    players.find(p => p.id === id)?.canPlayForward
+                  ).length}
+                </p>
+              </div>
+              <div className="bg-yellow-50 p-3 rounded-lg">
+                <div className="flex items-center text-yellow-700 mb-1">
+                  <Whistle size={16} className="mr-1" />
+                  <span className="text-sm font-medium">Arbitres</span>
+                </div>
+                <p className="text-2xl font-bold text-yellow-900">
+                  {selectedPlayers.filter(id => 
+                    players.find(p => p.id === id)?.canReferee
+                  ).length}
+                </p>
+              </div>
+            </div>
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {availablePlayers.map((player) => (
@@ -188,6 +219,26 @@ const MatchSheetCreate: React.FC = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Entraîneurs
             </label>
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <div className="flex items-center text-blue-700 mb-1">
+                  <UserCheck size={16} className="mr-1" />
+                  <span className="text-sm font-medium">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-900">{selectedCoaches.length}</p>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-lg">
+                <div className="flex items-center text-purple-700 mb-1">
+                  <GraduationCap size={16} className="mr-1" />
+                  <span className="text-sm font-medium">Diplômés</span>
+                </div>
+                <p className="text-2xl font-bold text-purple-900">
+                  {selectedCoaches.filter(id => 
+                    coaches.find(c => c.id === id)?.diploma
+                  ).length}
+                </p>
+              </div>
+            </div>
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {availableCoaches.map((coach) => (
