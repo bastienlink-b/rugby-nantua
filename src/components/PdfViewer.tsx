@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { getPdf, createPdfBlobUrl, getPublicUrl } from '../services/PdfStorage';
-import { convertDocxToPdf } from '../services/DocxService';
 import { FileText, AlertCircle, Loader } from 'lucide-react';
 
 interface PdfViewerProps {
@@ -32,41 +31,23 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ url, height = '600px' }) => {
       }
 
       try {
-        // Récupérer le fichier du stockage (local ou Supabase)
+        // Récupérer PDF du stockage (local ou Supabase)
         console.log(`Tentative de récupération du PDF: ${filename}`);
-        const fileContent = await getPdf(filename);
+        const pdfContent = await getPdf(filename);
         
-        if (!fileContent) {
-          // Si le fichier n'est pas trouvé localement, essayer d'utiliser l'URL publique Supabase
-          console.log('Fichier non trouvé, tentative avec URL publique');
+        if (!pdfContent) {
+          // Si le PDF n'est pas trouvé localement, essayer d'utiliser l'URL publique Supabase
+          console.log('PDF non trouvé, tentative avec URL publique');
           const publicUrl = getPublicUrl(filename);
           setPdfUrl(publicUrl);
           setLoading(false);
           return;
         }
 
-        console.log('Fichier trouvé, traitement...');
-        
-        // Handle Word documents
-        if (fileContent.startsWith('data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,')) {
-          console.log('Conversion du document Word en PDF...');
-          const base64Data = fileContent.split('base64,')[1];
-          const binaryString = atob(base64Data);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          const pdfBytes = await convertDocxToPdf(bytes.buffer);
-          const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
-          const blobUrl = URL.createObjectURL(pdfBlob);
-          setPdfUrl(blobUrl);
-        } else {
-          // Handle PDF files
-          console.log('Création de l\'URL de blob pour le PDF');
-          const blobUrl = createPdfBlobUrl(fileContent);
-          setPdfUrl(blobUrl);
-        }
-        
+        console.log('PDF trouvé, création de l\'URL de blob');
+        // Create a blob URL for the PDF
+        const blobUrl = createPdfBlobUrl(pdfContent);
+        setPdfUrl(blobUrl);
         setLoading(false);
       } catch (err) {
         console.error('Erreur lors de la création de l\'URL du PDF:', err);
