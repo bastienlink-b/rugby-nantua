@@ -49,6 +49,10 @@ export const generateAndDownloadMatchSheet = async (
     
     // Création d'une URL de blob
     const pdfDataUri = `data:application/pdf;base64,${pdfBase64}`;
+    
+    // Nettoyer les champs du formulaire avant de créer le blob
+    const cleanedPdfDataUri = await cleanPdfFormFields(pdfDataUri);
+    
     const blobUrl = createPdfBlobUrl(pdfDataUri);
     
     // Téléchargement du fichier
