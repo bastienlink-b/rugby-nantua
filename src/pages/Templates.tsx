@@ -213,6 +213,11 @@ const Templates: React.FC = () => {
       setIsAnalyzing(true);
       setAnalyzeError(null);
 
+      // Check if Mistral API key is defined
+      if (!import.meta.env.VITE_MISTRAL_API_KEY) {
+        throw new Error("Clé API Mistral non définie. Veuillez définir VITE_MISTRAL_API_KEY dans votre fichier .env");
+      }
+
       // If we have a PDF preview URL, we can use that
       if (pdfPreviewUrl) {
         console.log('Analyzing PDF...');
@@ -759,6 +764,18 @@ const Templates: React.FC = () => {
                       ) : analyzeError ? (
                         <div className="text-red-500">
                           {analyzeError}
+                          {analyzeError?.includes("Clé API Mistral non définie") && (
+                            <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                              <p className="font-medium">Configuration requise :</p>
+                              <p className="mt-1">Ajoutez votre clé API Mistral au fichier .env à la racine du projet :</p>
+                              <pre className="mt-2 p-2 bg-gray-800 text-white rounded text-xs overflow-x-auto">
+                                VITE_MISTRAL_API_KEY=votre_clé_api_ici
+                              </pre>
+                              <p className="mt-2 text-xs">
+                                Vous pouvez obtenir une clé API sur <a href="https://console.mistral.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">console.mistral.ai</a>
+                              </p>
+                            </div>
+                          )}
                         </div>
                       ) : formData.fieldMappings && formData.fieldMappings.length > 0 ? (
                         <div>
