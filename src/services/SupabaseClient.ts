@@ -31,11 +31,10 @@ export const initializeStorage = async () => {
       console.log('Utilisateur authentifié. Session active.');
     }
 
-    console.log('Vérification de l\'accès aux buckets:', TEMPLATES_BUCKET, 'et', GENERATED_BUCKET);
+    console.log('Initialisation des buckets de stockage...');
     
-    // Instead of listing buckets (which requires admin privileges),
-    // directly check if each bucket exists by trying to list files in it
-    await checkAndCreateBuckets();
+    // Create buckets if they don't exist
+    await createBucketsIfNotExist();
     
   } catch (error) {
     console.error('Erreur d\'initialisation du stockage:', error);
@@ -43,63 +42,44 @@ export const initializeStorage = async () => {
   }
 };
 
-// Check if buckets exist and create them if needed
-const checkAndCreateBuckets = async () => {
-  // Check template bucket
-  await checkAndCreateBucket(TEMPLATES_BUCKET);
+// Create buckets if they don't exist
+const createBucketsIfNotExist = async () => {
+  const buckets = [TEMPLATES_BUCKET, GENERATED_BUCKET];
   
-  // Check generated bucket
-  await checkAndCreateBucket(GENERATED_BUCKET);
-};
-
-// Helper function to check if a bucket exists and create it if needed
-const checkAndCreateBucket = async (bucketName: string) => {
-  try {
-    console.log(`Vérification de l'accès au bucket ${bucketName}...`);
-    
-    // Try to list files in the bucket to check if it exists and is accessible
-    const { data, error } = await supabase.storage.from(bucketName).list('', {
-      limit: 1,
-      offset: 0,
-    });
-    
-    if (error) {
-      console.warn(`Erreur lors de l'accès au bucket ${bucketName}:`, error.message);
+  for (const bucketName of buckets) {
+    try {
+      console.log(`Vérification du bucket ${bucketName}...`);
       
-      // If bucket doesn't exist or we don't have access, try to create it
-      if (error.message.includes('not found') || error.message.includes('does not exist')) {
-        await createBucket(bucketName);
-      } else if (error.message.includes('violates row-level security policy')) {
-        console.warn(`Problème de permission pour accéder au bucket ${bucketName}. Utilisation du stockage local.`);
-      }
-    } else {
-      console.log(`Accès réussi au bucket ${bucketName}. Fichiers disponibles:`, data?.length || 0);
-    }
-  } catch (error) {
-    console.warn(`Exception lors de l'accès au bucket ${bucketName}:`, error);
-  }
-};
-
-// Helper function to create a bucket
-const createBucket = async (bucketName: string) => {
-  try {
-    console.log(`Tentative de création du bucket ${bucketName}...`);
-    
-    const { error } = await supabase.storage.createBucket(bucketName, { 
-      public: true,
-      fileSizeLimit: 5242880 // 5MB limit
-    });
-    
-    if (error) {
-      console.warn(`Erreur lors de la création du bucket ${bucketName}:`, error.message);
+      // Try to get bucket details
+      const { error: listError } = await supabase.storage.from(bucketName).list('');
       
-      if (error.message.includes('violates row-level security policy')) {
-        console.warn(`Permissions insuffisantes pour créer le bucket ${bucketName}. Les PDFs seront stockés localement.`);
+      if (listError) {
+        console.log(`Le bucket ${bucketName} n'existe pas ou n'est pas accessible. Création...`);
+        
+        // Create the bucket
+        const { error: createError } = await supabase.storage.createBucket(bucketName, {
+          public: true,
+          fileSizeLimit: 5242880, // 5MB limit
+          allowedMimeTypes: ['application/pdf']
+        });
+        
+        if (createError) {
+          throw new Error(`Erreur lors de la création du bucket ${bucketName}: ${createError.message}`);
+        }
+        
+        console.log(`Bucket ${bucketName} créé avec succès!`);
+        
+        // Set public bucket policy
+        const { error: policyError } = await supabase.storage.from(bucketName).createSignedUrl('dummy.pdf', 3600);
+        if (!policyError) {
+          console.log(`Politique d'accès public configurée pour ${bucketName}`);
+        }
+      } else {
+        console.log(`Le bucket ${bucketName} existe déjà.`);
       }
-    } else {
-      console.log(`Bucket ${bucketName} créé avec succès!`);
+    } catch (error) {
+      console.error(`Erreur lors de la gestion du bucket ${bucketName}:`, error);
+      throw error; // Re-throw to be caught by the main try-catch
     }
-  } catch (error) {
-    console.warn(`Exception lors de la création du bucket ${bucketName}:`, error);
   }
 };
