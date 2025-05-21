@@ -114,10 +114,15 @@ export const extractTextFromPdf = async (pdfData: string): Promise<string> => {
   try {
     console.log('Démarrage de l\'extraction de texte depuis le PDF...');
     
-    // Si les données PDF sont en base64, on doit les traiter
-    let pdfContent = pdfData;
-    if (pdfData.startsWith('data:application/pdf;base64,')) {
-      pdfContent = pdfData.split('base64,')[1];
+    // Handle different file types
+    let content = pdfData;
+    let isWord = false;
+    
+    if (pdfData.startsWith('data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,')) {
+      content = pdfData.split('base64,')[1];
+      isWord = true;
+    } else if (pdfData.startsWith('data:application/pdf;base64,')) {
+      content = pdfData.split('base64,')[1];
     }
     
     // Get the Mistral API key
