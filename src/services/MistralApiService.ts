@@ -1,4 +1,6 @@
 // Types for PDF field mapping
+import { supabase } from './SupabaseClient';
+
 export interface PdfFieldMapping {
   champ_pdf: string;
   type: 'joueur' | 'educateur' | 'global' | 'autre';
