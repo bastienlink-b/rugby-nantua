@@ -598,7 +598,7 @@ const Templates: React.FC = () => {
 
             <div className="p-4 overflow-y-auto flex-grow">
               {currentStep === 'upload' && (
-                <div className="space-y-4">
+                <div className="space-y-4 overflow-y-auto">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Nom du modèle
@@ -720,7 +720,7 @@ const Templates: React.FC = () => {
               )}
 
               {currentStep === 'analyze' && (
-                <div className="space-y-4">
+                <div className="space-y-4 overflow-y-auto">
                   <div className="mb-4">
                     <div className="border rounded-md overflow-hidden">
                       <div className="p-3 bg-gray-50 border-b">
