@@ -43,6 +43,9 @@ const Templates: React.FC = () => {
   // État pour Supabase Storage
   const [isSyncingWithCloud, setSyncingWithCloud] = useState(false);
   const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  
+  // État pour l'analyse d'un modèle existant
+  const [analysingTemplateId, setAnalysingTemplateId] = useState<string | null>(null);
 
   // Sort age categories from youngest to oldest (M6, M8, M10, etc.)
   const sortedAgeCategories = [...ageCategories].sort((a, b) => {
@@ -285,8 +288,11 @@ const Templates: React.FC = () => {
   };
 
   // Fonction modifiée pour analyser le PDF avec Mistral OCR et utiliser les analyses sauvegardées
-  const analyzePdf = async () => {
-    if (!formData.fileUrl) {
+  const analyzePdf = async (templateFileUrl?: string, templateId?: string) => {
+    // Utiliser soit l'URL du modèle en cours d'édition, soit l'URL fournie
+    const fileUrl = templateFileUrl || formData.fileUrl;
+    
+    if (!fileUrl) {
       setAnalysisError("Aucun fichier PDF n'a été sélectionné");
       return;
     }
@@ -294,9 +300,13 @@ const Templates: React.FC = () => {
     try {
       setOcrStatus('extracting');
       setAnalysisError(null);
+      
+      if (templateId) {
+        setAnalysingTemplateId(templateId);
+      }
 
       // Récupérer le nom du fichier depuis l'URL
-      const fileName = formData.fileUrl.split('/').pop();
+      const fileName = fileUrl.split('/').pop();
       if (!fileName) {
         throw new Error("Nom de fichier invalide");
       }
@@ -307,12 +317,28 @@ const Templates: React.FC = () => {
       if (existingAnalysis) {
         console.log(`Utilisation de l'analyse existante pour ${fileName}`);
         setAnalyzedFields(existingAnalysis);
-        setFormData({
-          ...formData,
-          fieldMappings: existingAnalysis,
-        });
+        
+        if (templateId) {
+          // Mise à jour directe du template existant
+          const templateToUpdate = templates.find(t => t.id === templateId);
+          if (templateToUpdate) {
+            await updateTemplate(templateId, {
+              ...templateToUpdate,
+              fieldMappings: existingAnalysis
+            });
+            setAnalysingTemplateId(null);
+            alert('Mappage des champs mis à jour avec succès pour le modèle.');
+          }
+        } else {
+          // Mise à jour du formulaire
+          setFormData({
+            ...formData,
+            fieldMappings: existingAnalysis,
+          });
+          setShowMappingEditor(true);
+        }
+        
         setOcrStatus('success');
-        setShowMappingEditor(true);
         return;
       }
       
@@ -334,23 +360,39 @@ const Templates: React.FC = () => {
         
         // Sauvegarder l'analyse pour utilisation future
         savePdfAnalysis(fileName, mappings);
-        
         setAnalyzedFields(mappings);
-        setFormData({
-          ...formData,
-          fieldMappings: mappings,
-        });
+        
+        if (templateId) {
+          // Mise à jour directe du template existant
+          const templateToUpdate = templates.find(t => t.id === templateId);
+          if (templateToUpdate) {
+            await updateTemplate(templateId, {
+              ...templateToUpdate,
+              fieldMappings: mappings
+            });
+            setAnalysingTemplateId(null);
+            alert('Mappage des champs ajouté au modèle avec succès.');
+          }
+        } else {
+          // Mise à jour du formulaire
+          setFormData({
+            ...formData,
+            fieldMappings: mappings,
+          });
+          setShowMappingEditor(true);
+        }
         
         setOcrStatus('success');
-        setShowMappingEditor(true);
       } catch (error: any) {
         console.error('Erreur lors de l\'analyse du PDF', error);
         setOcrStatus('error');
         setAnalysisError(error.message || "Erreur lors de l'analyse du PDF");
+        setAnalysingTemplateId(null);
       }
     } catch (error: any) {
       setOcrStatus('error');
       setAnalysisError(error.message || "Erreur lors de l'analyse du PDF");
+      setAnalysingTemplateId(null);
     }
   };
 
@@ -573,21 +615,42 @@ const Templates: React.FC = () => {
                     <span className="truncate max-w-[250px]">{template.fileUrl.split('/').pop()}</span>
                   </div>
                   
-                  <div className="flex justify-between items-center">
-                    {template.fieldMappings && template.fieldMappings.length > 0 && (
+                  <div className="flex items-center justify-between mt-1">
+                    {template.fieldMappings && template.fieldMappings.length > 0 ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         <Check size={12} className="mr-1" />
                         {template.fieldMappings.length} champs analysés
                       </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        <AlertTriangle size={12} className="mr-1" />
+                        Aucun champ analysé
+                      </span>
                     )}
-                    <a 
-                      href={template.fileUrl} 
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium ml-auto"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Aperçu
-                    </a>
+                    <div className="flex items-center">
+                      <button 
+                        onClick={() => analyzePdf(template.fileUrl, template.id)}
+                        className={`text-indigo-600 hover:text-indigo-800 text-sm font-medium mr-2 flex items-center ${
+                          analysingTemplateId === template.id ? 'opacity-70 cursor-wait' : ''
+                        }`}
+                        disabled={analysingTemplateId === template.id}
+                      >
+                        {analysingTemplateId === template.id ? (
+                          <Loader size={14} className="mr-1 animate-spin" />
+                        ) : (
+                          <Scan size={14} className="mr-1" />
+                        )}
+                        Analyser
+                      </button>
+                      <a 
+                        href={template.fileUrl} 
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Aperçu
+                      </a>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -852,7 +915,7 @@ const Templates: React.FC = () => {
                             {/* Bouton pour analyser le PDF */}
                             <button
                               type="button"
-                              onClick={analyzePdf}
+                              onClick={() => analyzePdf()}
                               disabled={ocrStatus === 'extracting' || ocrStatus === 'analyzing'}
                               className={`flex items-center justify-center py-2 px-3 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
                                 ocrStatus === 'extracting' || ocrStatus === 'analyzing'
