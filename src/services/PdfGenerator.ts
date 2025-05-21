@@ -71,6 +71,14 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
 
   console.log(`Le PDF contient ${fields.length} champs de formulaire`);
   
+  // Log détaillé des champs trouvés pour le débogage
+  if (fields.length > 0) {
+    console.log("Détail des champs trouvés dans le formulaire:");
+    fields.forEach(field => {
+      console.log(`- Nom: "${field.getName()}", Type: ${field.constructor.name}`);
+    });
+  }
+  
   // Préparation des données à insérer dans le PDF
   const data: PdfData = {
     nom_manifestation: tournament.location,
