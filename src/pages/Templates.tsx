@@ -579,8 +579,8 @@ const Templates: React.FC = () => {
       {/* Upload Modal */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden">
-            <div className="flex justify-between items-center p-6 border-b">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b flex-shrink-0">
               <h3 className="text-lg font-medium text-gray-900">
                 {currentStep === 'upload' && 'Téléverser un modèle'}
                 {currentStep === 'analyze' && 'Analyser le modèle'}
@@ -596,7 +596,7 @@ const Templates: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-6">
+            <div className="p-4 overflow-y-auto flex-grow">
               {currentStep === 'upload' && (
                 <div className="space-y-4">
                   <div>
@@ -632,7 +632,7 @@ const Templates: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Catégories d'âge (au moins une)
                     </label>
-                    <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
+                    <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3 max-h-32 overflow-y-auto">
                       {sortedCategories.map((category) => (
                         <label key={category.id} className="flex items-center">
                           <input
@@ -658,10 +658,10 @@ const Templates: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Fichier PDF
                     </label>
-                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                    <div className="mt-1 flex justify-center px-4 pt-3 pb-3 border-2 border-gray-300 border-dashed rounded-md">
                       <div className="space-y-1 text-center">
                         <div className="flex flex-col items-center">
-                          <UploadCloud size={36} className="text-gray-400" />
+                          <UploadCloud size={28} className="text-gray-400" />
                           <p className="text-sm text-gray-600 mt-1">
                             {uploadedFileName ? (
                               <span className="text-blue-600 font-medium">{uploadedFileName}</span>
@@ -726,8 +726,8 @@ const Templates: React.FC = () => {
                       <div className="p-3 bg-gray-50 border-b">
                         <h4 className="font-medium text-sm text-gray-700">Aperçu du modèle</h4>
                       </div>
-                      <div className="p-3 max-h-48 overflow-auto">
-                        <PdfViewer url={pdfPreviewUrl || ''} height="200px" />
+                      <div className="p-3 max-h-40 overflow-auto">
+                        <PdfViewer url={pdfPreviewUrl || ''} height="150px" />
                       </div>
                     </div>
                   </div>
@@ -757,7 +757,7 @@ const Templates: React.FC = () => {
                     </div>
                     <div className="mt-1 bg-gray-50 rounded-md p-3 text-sm text-gray-700">
                       {isAnalyzing ? (
-                        <div className="flex items-center justify-center py-8">
+                        <div className="flex items-center justify-center py-4">
                           <Loader size={24} className="animate-spin mr-2 text-blue-500" />
                           <p>Analyse du PDF en cours...</p>
                         </div>
@@ -801,57 +801,57 @@ const Templates: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
 
-              <div className="mt-6 flex justify-end space-x-3 pt-4 border-t">
+            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsUploadModalOpen(false);
+                  resetForm();
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              
+              {currentStep === 'upload' && (
+                <button
+                  type="button"
+                  onClick={handleFileUpload}
+                  disabled={!uploadedFile || !formData.name || formData.ageCategoryIds.length === 0}
+                  className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                    !uploadedFile || !formData.name || formData.ageCategoryIds.length === 0
+                      ? 'bg-blue-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  Continuer
+                </button>
+              )}
+              
+              {currentStep === 'analyze' && (
                 <button
                   type="button"
                   onClick={() => {
-                    setIsUploadModalOpen(false);
-                    resetForm();
+                    if (isFieldMappingOpen) {
+                      setIsUploadModalOpen(false);
+                      setIsFieldMappingOpen(false);
+                      setIsModalOpen(true);
+                    } else {
+                      setIsFieldMappingOpen(true);
+                    }
                   }}
-                  className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  disabled={formData.fieldMappings.length === 0}
+                  className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                    formData.fieldMappings.length === 0
+                      ? 'bg-blue-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
                 >
-                  Annuler
+                  Continuer
                 </button>
-                
-                {currentStep === 'upload' && (
-                  <button
-                    type="button"
-                    onClick={handleFileUpload}
-                    disabled={!uploadedFile || !formData.name || formData.ageCategoryIds.length === 0}
-                    className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-                      !uploadedFile || !formData.name || formData.ageCategoryIds.length === 0
-                        ? 'bg-blue-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
-                  >
-                    Continuer
-                  </button>
-                )}
-                
-                {currentStep === 'analyze' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isFieldMappingOpen) {
-                        setIsUploadModalOpen(false);
-                        setIsFieldMappingOpen(false);
-                        setIsModalOpen(true);
-                      } else {
-                        setIsFieldMappingOpen(true);
-                      }
-                    }}
-                    disabled={formData.fieldMappings.length === 0}
-                    className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-                      formData.fieldMappings.length === 0
-                        ? 'bg-blue-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
-                  >
-                    Continuer
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -860,8 +860,8 @@ const Templates: React.FC = () => {
       {/* Field Mapping Modal */}
       {isFieldMappingOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto overflow-hidden">
-            <div className="flex justify-between items-center p-6 border-b">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b flex-shrink-0">
               <h3 className="text-lg font-medium text-gray-900">
                 Champs détectés dans le PDF
               </h3>
@@ -877,7 +877,7 @@ const Templates: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-6 max-h-[70vh] overflow-y-auto">
+            <div className="p-4 overflow-y-auto flex-grow">
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-4">
                   Vérifiez et modifiez les correspondances entre les champs du PDF et les données de l'application.
@@ -896,80 +896,82 @@ const Templates: React.FC = () => {
               </div>
               
               <div className="border rounded-lg overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Champ PDF
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Type
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Correspondance
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {formData.fieldMappings.map((mapping, index) => (
-                      <tr key={index} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 text-sm">
-                          <input
-                            type="text"
-                            value={mapping.champ_pdf}
-                            onChange={(e) => updateFieldMapping(index, 'champ_pdf', e.target.value)}
-                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
-                            placeholder="Nom du champ"
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-sm">
-                          <select
-                            value={mapping.type}
-                            onChange={(e) => updateFieldMapping(index, 'type', e.target.value)}
-                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
-                          >
-                            <option value="global">Global</option>
-                            <option value="joueur">Joueur</option>
-                            <option value="educateur">Éducateur</option>
-                            <option value="autre">Autre</option>
-                          </select>
-                        </td>
-                        <td className="px-4 py-2 text-sm">
-                          <input
-                            type="text"
-                            value={mapping.mapping}
-                            onChange={(e) => updateFieldMapping(index, 'mapping', e.target.value)}
-                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
-                            placeholder="Correspondance (ex: joueur.nom)"
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-sm">
-                          <button
-                            type="button"
-                            onClick={() => removeFieldMapping(index)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {formData.fieldMappings.length === 0 && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
                       <tr>
-                        <td colSpan={4} className="px-4 py-4 text-sm text-center text-gray-500">
-                          Aucun champ détecté. Cliquez sur "Ajouter un champ" pour en créer un manuellement.
-                        </td>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Champ PDF
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Correspondance
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {formData.fieldMappings.map((mapping, index) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 text-sm">
+                            <input
+                              type="text"
+                              value={mapping.champ_pdf}
+                              onChange={(e) => updateFieldMapping(index, 'champ_pdf', e.target.value)}
+                              className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                              placeholder="Nom du champ"
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            <select
+                              value={mapping.type}
+                              onChange={(e) => updateFieldMapping(index, 'type', e.target.value)}
+                              className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                            >
+                              <option value="global">Global</option>
+                              <option value="joueur">Joueur</option>
+                              <option value="educateur">Éducateur</option>
+                              <option value="autre">Autre</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            <input
+                              type="text"
+                              value={mapping.mapping}
+                              onChange={(e) => updateFieldMapping(index, 'mapping', e.target.value)}
+                              className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                              placeholder="Correspondance (ex: joueur.nom)"
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-sm">
+                            <button
+                              type="button"
+                              onClick={() => removeFieldMapping(index)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {formData.fieldMappings.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-4 text-sm text-center text-gray-500">
+                            Aucun champ détecté. Cliquez sur "Ajouter un champ" pour en créer un manuellement.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
-            <div className="p-6 bg-gray-50 border-t flex justify-end space-x-3">
+            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -999,8 +1001,8 @@ const Templates: React.FC = () => {
       {/* Edit/Create Template Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden">
-            <div className="flex justify-between items-center p-6 border-b">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b flex-shrink-0">
               <h3 className="text-lg font-medium text-gray-900">
                 {editingTemplateId ? 'Modifier le modèle' : 'Finaliser le modèle'}
               </h3>
@@ -1015,8 +1017,8 @@ const Templates: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6">
-              <div className="space-y-4">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-grow">
+              <div className="p-4 space-y-4 overflow-y-auto">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Nom du modèle
@@ -1048,7 +1050,7 @@ const Templates: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Catégories d'âge (au moins une)
                   </label>
-                  <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
+                  <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3 max-h-32 overflow-y-auto">
                     {sortedCategories.map((category) => (
                       <label key={category.id} className="flex items-center">
                         <input
@@ -1075,8 +1077,8 @@ const Templates: React.FC = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Aperçu du modèle PDF
                     </label>
-                    <div className="border rounded-md overflow-hidden max-h-48">
-                      <PdfViewer url={pdfPreviewUrl} height="180px" />
+                    <div className="border rounded-md overflow-hidden" style={{ height: "150px" }}>
+                      <PdfViewer url={pdfPreviewUrl} height="150px" />
                     </div>
                   </div>
                 )}
@@ -1103,7 +1105,7 @@ const Templates: React.FC = () => {
                 )}
               </div>
 
-              <div className="mt-6 flex justify-end space-x-3">
+              <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => {
