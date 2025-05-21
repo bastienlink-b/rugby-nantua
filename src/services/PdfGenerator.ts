@@ -102,6 +102,8 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
     }))
   };
 
+  console.log("Données préparées pour le remplissage du PDF:", JSON.stringify(data, null, 2));
+
   if (fields.length > 0) {
     // Si le PDF a des champs de formulaire, remplir ces champs
     console.log("PDF avec formulaire détecté, remplissage des champs...");
@@ -146,14 +148,20 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
 
   // Aplatir le formulaire pour rendre les champs remplis non modifiables
   try {
+    console.log("Tentative d'aplatissement du formulaire...");
     form.flatten();
     console.log("Formulaire aplati avec succès");
   } catch (e) {
     console.warn("Erreur lors de l'aplatissement du formulaire:", e);
+    console.log("Continuer sans aplatir le formulaire...");
   }
 
   // Enregistrement du PDF modifié
-  return pdfDoc.save();
+  console.log("Enregistrement du PDF modifié...");
+  const modifiedPdfBytes = await pdfDoc.save();
+  console.log("PDF modifié enregistré avec succès.");
+  
+  return modifiedPdfBytes;
 };
 
 /**
@@ -272,6 +280,9 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
                 const indexFieldName = `${mapping.champ_pdf}${index + 1}`;
                 console.log(`  Tentative avec le champ "${indexFieldName}" pour la valeur "${value}"`);
                 fillField(form, indexFieldName, value);
+                
+                // Essayer les variantes du nom de champ
+                tryFillVariantFieldNames(form, indexFieldName, value);
               }
             } catch (error) {
               console.warn(`Erreur lors du remplissage du champ éducateur ${mapping.champ_pdf}:`, error);
@@ -310,13 +321,22 @@ const tryFillVariantFieldNames = (form: PDFForm, baseFieldName: string, value: a
     `form_${baseFieldName}`,
     `field_${baseFieldName}`,
     `${baseFieldName}_field`,
-    `txt${baseFieldName}`
+    `txt${baseFieldName}`,
+    
+    // Autres variations courantes dans les PDFs
+    `fld${baseFieldName}`,
+    `f${baseFieldName}`,
+    `${baseFieldName.replace(/[^a-zA-Z0-9]/g, "")}` // Supprime tous les caractères spéciaux
   ];
   
   // Essayer de remplir chaque variante
   variants.forEach(variant => {
     if (variant !== baseFieldName) {
-      fillField(form, variant, value);
+      try {
+        fillField(form, variant, value);
+      } catch (e) {
+        // Ignore les erreurs pour les variantes
+      }
     }
   });
 };
@@ -335,6 +355,8 @@ const fillField = (form: PDFForm, fieldName: string, value: any) => {
       // Pas d'erreur log si le champ n'existe pas, c'est normal dans notre approche d'essayer différentes variations
       return;
     }
+
+    console.log(`Tentative de remplissage du champ "${fieldName}" avec la valeur:`, value);
 
     // Gérer différents types de champs
     if (field.constructor.name === 'PDFTextField') {

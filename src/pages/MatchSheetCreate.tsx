@@ -3,6 +3,7 @@ import { useAppContext } from '../context/AppContext';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, FileText, Users, Award, UserCheck, ShieldCheck, Castle as Whistle, GraduationCap, Loader } from 'lucide-react';
 import { generateAndStorePdf } from '../services/PdfExportService';
+import { validateMatchSheet } from '../services/MatchSheetService';
 
 const MatchSheetCreate: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ const MatchSheetCreate: React.FC = () => {
   const [editMode, setEditMode] = useState<boolean>(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [existingPdfUrl, setExistingPdfUrl] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
 
   // Tri des catégories d'âge dans l'ordre spécifique (M6, M8, M10, etc.)
   const sortedCategories = [...ageCategories].sort((a, b) => {
@@ -39,9 +41,11 @@ const MatchSheetCreate: React.FC = () => {
   useEffect(() => {
     // Extract matchSheetId from search parameters or location state
     const matchSheetId = searchParams.get('id') || 
-                        (location.state as { id?: string })?.id;
+                        (location.state as { id?: string })?.id ||
+                        location.pathname.split('/').pop();
     
-    if (matchSheetId) {
+    if (matchSheetId && matchSheetId !== 'create') {
+      console.log("Mode édition détecté pour la feuille:", matchSheetId);
       setEditMode(true);
       setEditId(matchSheetId);
       loadMatchSheetData(matchSheetId);
@@ -50,8 +54,10 @@ const MatchSheetCreate: React.FC = () => {
 
   // Load match sheet data when in edit mode
   const loadMatchSheetData = async (id: string) => {
+    console.log("Chargement des données de la feuille:", id);
     const matchSheet = await getMatchSheetById(id);
     if (matchSheet) {
+      console.log("Données de la feuille chargées:", matchSheet);
       setSelectedTournament(matchSheet.tournamentId || '');
       setSelectedTemplate(matchSheet.templateId || '');
       setSelectedCategory(matchSheet.ageCategoryId || '');
@@ -59,6 +65,10 @@ const MatchSheetCreate: React.FC = () => {
       setSelectedCoaches(matchSheet.coachIds || []);
       setReferentCoach(matchSheet.referentCoachId || '');
       setExistingPdfUrl(matchSheet.pdfUrl || null);
+    } else {
+      console.error("Feuille de match non trouvée:", id);
+      alert("Feuille de match introuvable");
+      navigate('/match-sheets');
     }
   };
 
@@ -85,19 +95,32 @@ const MatchSheetCreate: React.FC = () => {
   useEffect(() => {
     if (selectedTournament) {
       const tournament = tournaments.find(t => t.id === selectedTournament);
-      if (tournament && tournament.ageCategoryIds.length > 0) {
+      if (tournament && tournament.ageCategoryIds.length > 0 && !selectedCategory) {
         setSelectedCategory(tournament.ageCategoryIds[0]);
       }
     }
-  }, [selectedTournament, tournaments]);
+  }, [selectedTournament, tournaments, selectedCategory]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    setFormErrors([]);
+    
+    // Get selected tournament object
+    const tournament = tournaments.find(t => t.id === selectedTournament);
+    
     // Validate form data
-    if (!selectedTournament || !selectedCategory || !selectedTemplate || 
-        selectedPlayers.length === 0 || selectedCoaches.length === 0 || !referentCoach) {
-      alert('Veuillez remplir tous les champs obligatoires.');
+    const validation = validateMatchSheet(
+      tournament,
+      selectedTemplate,
+      selectedCategory,
+      availablePlayers.filter(p => selectedPlayers.includes(p.id)),
+      availableCoaches.filter(c => selectedCoaches.includes(c.id)),
+      referentCoach
+    );
+    
+    if (!validation.isValid) {
+      setFormErrors(validation.errors);
       return;
     }
     
@@ -117,11 +140,19 @@ const MatchSheetCreate: React.FC = () => {
 
       let pdfUrl = existingPdfUrl;
       
+      console.log("Début du processus de génération/mise à jour de la feuille de match");
+      console.log("Mode édition:", editMode);
+      console.log("PDF existant:", existingPdfUrl);
+      console.log("Nombre de joueurs sélectionnés:", selectedPlayers.length);
+      console.log("Nombre d'entraîneurs sélectionnés:", selectedCoaches.length);
+      
       // Générer un nouveau PDF si on est en mode création ou si un paramètre important a changé en mode édition
       if (!editMode || !existingPdfUrl || 
           (editMode && (selectedPlayers.length > 0 || selectedCoaches.length > 0))) {
         // Générer et stocker le PDF
         setGenerationStatus('Génération du PDF...');
+        console.log("Génération d'un nouveau PDF...");
+        
         const pdfFilename = await generateAndStorePdf(
           selectedTemplate,
           selectedTournament,
@@ -131,7 +162,11 @@ const MatchSheetCreate: React.FC = () => {
           template,
           tournament
         );
+        
         pdfUrl = `/generated_pdfs/${pdfFilename}`;
+        console.log("Nouveau PDF généré:", pdfUrl);
+      } else {
+        console.log("Conservation du PDF existant:", pdfUrl);
       }
       
       setGenerationStatus('Enregistrement des données...');
@@ -145,6 +180,8 @@ const MatchSheetCreate: React.FC = () => {
         coachIds: selectedCoaches,
         pdfUrl: pdfUrl || undefined
       };
+      
+      console.log("Données de la feuille de match à sauvegarder:", matchSheetData);
       
       if (editMode && editId) {
         await updateMatchSheet(editId, matchSheetData);
@@ -184,6 +221,17 @@ const MatchSheetCreate: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {formErrors.length > 0 && (
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-red-800 font-medium mb-2">Veuillez corriger les erreurs suivantes :</h3>
+          <ul className="list-disc pl-5 text-red-700 text-sm">
+            {formErrors.map((error, index) => (
+              <li key={index}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm">
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
@@ -309,7 +357,7 @@ const MatchSheetCreate: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="border border-gray-200 rounded-lg p-4">
+            <div className="border border-gray-200 rounded-lg p-4 max-h-72 overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {availablePlayers.map((player) => (
                   <label
@@ -363,7 +411,7 @@ const MatchSheetCreate: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="border border-gray-200 rounded-lg p-4">
+            <div className="border border-gray-200 rounded-lg p-4 max-h-72 overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {availableCoaches.map((coach) => (
                   <label
