@@ -56,7 +56,7 @@ export const savePdfAnalysis = (pdfKey: string, mappings: PdfFieldMapping[]): vo
  * @param pdfKey A unique identifier for the PDF (usually the filename)
  * @returns The saved field mappings or null if not found
  */
-export const getSavedPdfAnalysis = (pdfKey: string): PdfFieldMapping[] | null => {
+export const getSavedPdfAnalysis = async (pdfKey: string): Promise<PdfFieldMapping[] | null> => {
   try {
     // D'abord essayer depuis le localStorage pour un accès rapide
     const savedData = localStorage.getItem(`${ANALYSIS_STORAGE_PREFIX}${pdfKey}`);
