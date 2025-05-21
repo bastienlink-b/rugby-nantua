@@ -6,11 +6,9 @@
 import { PDFDocument, PDFField, PDFForm } from 'pdf-lib';
 import { supabase, TEMPLATES_BUCKET, GENERATED_BUCKET } from './SupabaseClient';
 import { sha256 } from 'js-sha256';
-import { convertDocxToPdf } from './DocxService';
 
 // Préfixe utilisé pour stocker les fichiers dans le localStorage
 const PDF_STORAGE_PREFIX = 'pdf_';
-const DOCX_STORAGE_PREFIX = 'docx_';
 
 // Cache pour les hashes de fichiers
 const fileHashCache = new Map<string, string>();
@@ -92,27 +90,6 @@ export const getPdf = async (filename: string): Promise<string | null> => {
   // Si pas dans le localStorage, essayer de récupérer depuis Supabase
   try {
     console.log(`Tentative de récupération du fichier depuis Supabase: ${normalizedPath}`);
-    
-    // Handle Word documents
-    if (normalizedPath.toLowerCase().endsWith('.docx')) {
-      const docxContent = localStorage.getItem(`${DOCX_STORAGE_PREFIX}${normalizedPath}`);
-      if (docxContent) {
-        // Convert Word to PDF
-        const base64Data = docxContent.split('base64,')[1];
-        const binaryString = atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const pdfBytes = await convertDocxToPdf(bytes.buffer);
-        const pdfBase64 = btoa(
-          Array.from(new Uint8Array(pdfBytes))
-            .map(byte => String.fromCharCode(byte))
-            .join('')
-        );
-        return `data:application/pdf;base64,${pdfBase64}`;
-      }
-    }
     
     // Définir tous les chemins possibles
     // Inclut le chemin original, et des variations avec des préfixes courants
