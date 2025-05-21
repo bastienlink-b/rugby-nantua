@@ -5,7 +5,7 @@
 
 import { PDFDocument, PDFField, PDFForm } from 'pdf-lib';
 import { supabase, TEMPLATES_BUCKET, GENERATED_BUCKET } from './SupabaseClient';
-import { createHash } from 'crypto';
+import { sha256 } from 'js-sha256';
 
 // Préfixe utilisé pour stocker les fichiers dans le localStorage
 const PDF_STORAGE_PREFIX = 'pdf_';
@@ -18,7 +18,7 @@ const fileHashCache = new Map<string, string>();
  */
 const calculatePdfHash = async (content: string): Promise<string> => {
   const base64Data = content.includes('base64,') ? content.split(',')[1] : content;
-  return createHash('sha256').update(base64Data).digest('hex');
+  return sha256(base64Data);
 };
 
 /**
