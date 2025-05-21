@@ -12,7 +12,6 @@ export interface PdfFieldMapping {
 const ANALYSIS_STORAGE_PREFIX = 'pdf_analysis_';
 
 // Mistral API configuration
-const MISTRAL_API_KEY = 'MISTRAL_API_KEY'; // Remplacer par la clé réelle ou utiliser une variable d'environnement
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 
 /**
@@ -64,7 +63,7 @@ export const hasAnalysis = (pdfKey: string): boolean => {
 };
 
 /**
- * Extracts text from a PDF file using pdf.js
+ * Extracts text from a PDF file and uses Mistral AI to help with extraction
  * @param pdfData Base64 encoded PDF data
  * @returns The extracted text
  */
@@ -85,44 +84,28 @@ export const extractTextFromPdf = async (pdfData: string): Promise<string> => {
     Ton objectif est d'extraire tout le texte visible du PDF, en préservant autant que possible la structure.
     Représente les champs de formulaire, tableaux et zones de texte de manière claire.
     
-    Base64 du PDF: ${pdfContent.substring(0, 1000)}... (tronqué)
+    Base64 du PDF: ${pdfContent.substring(0, 5000)}... (tronqué)
     `;
     
-    console.log('Préparation de la requête à l\'API Mistral pour l\'extraction de texte...');
+    console.log('Envoi de la requête à l\'API Mistral pour l\'extraction de texte...');
     
-    // Dans une implémentation réelle, on appellerait l'API Mistral ici
-    // Pour cette démonstration, on simule la réponse
+    // Appel à l'API Mistral pour l'extraction de texte
+    const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY;
     
-    // Simulation d'un délai de traitement
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    if (!MISTRAL_API_KEY) {
+      throw new Error('Clé API Mistral non définie. Veuillez définir VITE_MISTRAL_API_KEY dans votre fichier .env');
+    }
+    
+    const extractedText = await callMistralApi(`
+      Voici le contenu d'un PDF encodé en base64 (tronqué).
+      Extrais tout le texte visible de ce PDF, en préservant autant que possible la structure.
+      
+      Base64 du PDF: ${pdfContent.substring(0, 5000)}... (tronqué)
+    `, MISTRAL_API_KEY);
     
     console.log('Texte extrait avec succès du PDF');
     
-    // Texte extrait simulé
-    return `
-      Club organisateur: RC MASSY ESSONNE
-      Catégorie: M14
-      Date: 15/10/2024
-      Lieu: Stade Jules Ladoumègue
-      
-      ÉQUIPE A:
-      Nom du club: RC MASSY ESSONNE
-      Éducateur responsable: DUPONT Jean
-      
-      Joueurs:
-      1. MARTIN Thomas - License: 1234567
-      2. PETIT Lucas - License: 2345678
-      3. DUBOIS Nathan - License: 3456789
-      
-      ÉQUIPE B:
-      Nom du club: US OLYMPIQUE
-      Éducateur responsable: LEROY Marc
-      
-      Joueurs:
-      1. BERNARD Hugo - License: 4567890
-      2. DURAND Louis - License: 5678901
-      3. MOREAU Jules - License: 6789012
-    `;
+    return extractedText;
     
   } catch (error) {
     console.error('Erreur lors de l\'extraction de texte depuis le PDF:', error);
@@ -179,107 +162,61 @@ export const analyzePdfStructure = async (extractedText: string): Promise<PdfFie
     Ne fournis que le JSON, sans autre texte autour.
     `;
     
-    console.log('Envoi de la requête à l\'API Mistral...');
+    console.log('Envoi de la requête à l\'API Mistral pour l\'analyse de structure...');
     
-    // Dans une implémentation réelle, on appellerait l'API Mistral ici
-    // Pour cette démonstration, on simule la réponse
+    // Appel à l'API Mistral
+    const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY;
     
-    // Simulation d'un délai de traitement
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!MISTRAL_API_KEY) {
+      throw new Error('Clé API Mistral non définie. Veuillez définir VITE_MISTRAL_API_KEY dans votre fichier .env');
+    }
     
-    console.log('Analyse de structure terminée, réception des résultats...');
+    const analysisResponse = await callMistralApi(prompt, MISTRAL_API_KEY);
     
-    // Exemple de mappings que l'API Mistral pourrait retourner
-    const mappings: PdfFieldMapping[] = [
-      {
-        champ_pdf: "Club organisateur",
-        type: "global",
-        mapping: "tournoi.club_organisateur",
-      },
-      {
-        champ_pdf: "Catégorie",
-        type: "global",
-        mapping: "tournoi.categorie",
-      },
-      {
-        champ_pdf: "Date",
-        type: "global",
-        mapping: "tournoi.date",
-      },
-      {
-        champ_pdf: "Lieu",
-        type: "global",
-        mapping: "tournoi.lieu",
-      },
-      {
-        champ_pdf: "Nom du club (Équipe A)",
-        type: "global",
-        mapping: "equipe_a.nom",
-      },
-      {
-        champ_pdf: "Nom de l'éducateur (Équipe A)",
-        type: "educateur",
-        mapping: "educateur.nom",
-      },
-      {
-        champ_pdf: "Prénom de l'éducateur (Équipe A)",
-        type: "educateur",
-        mapping: "educateur.prenom",
-      },
-      {
-        champ_pdf: "Nom du joueur (Équipe A)",
-        type: "joueur",
-        mapping: "joueur.nom",
-        valeur_possible: ["MARTIN", "PETIT", "DUBOIS"]
-      },
-      {
-        champ_pdf: "Prénom du joueur (Équipe A)",
-        type: "joueur",
-        mapping: "joueur.prenom",
-        valeur_possible: ["Thomas", "Lucas", "Nathan"]
-      },
-      {
-        champ_pdf: "Licence joueur (Équipe A)",
-        type: "joueur",
-        mapping: "joueur.licence",
-        valeur_possible: ["1234567", "2345678", "3456789"]
-      },
-      {
-        champ_pdf: "Nom du club (Équipe B)",
-        type: "global",
-        mapping: "equipe_b.nom",
-      },
-      {
-        champ_pdf: "Nom de l'éducateur (Équipe B)",
-        type: "educateur",
-        mapping: "educateur.nom",
-      },
-      {
-        champ_pdf: "Prénom de l'éducateur (Équipe B)",
-        type: "educateur",
-        mapping: "educateur.prenom",
-      },
-      {
-        champ_pdf: "Nom du joueur (Équipe B)",
-        type: "joueur",
-        mapping: "joueur.nom",
-        valeur_possible: ["BERNARD", "DURAND", "MOREAU"]
-      },
-      {
-        champ_pdf: "Prénom du joueur (Équipe B)",
-        type: "joueur",
-        mapping: "joueur.prenom",
-        valeur_possible: ["Hugo", "Louis", "Jules"]
-      },
-      {
-        champ_pdf: "Licence joueur (Équipe B)",
-        type: "joueur",
-        mapping: "joueur.licence",
-        valeur_possible: ["4567890", "5678901", "6789012"]
+    console.log('Analyse de structure terminée, traitement des résultats...');
+    
+    // Extraire le JSON de la réponse
+    let jsonResponse: PdfFieldMapping[];
+    
+    try {
+      // Tenter de parser directement la réponse
+      jsonResponse = JSON.parse(analysisResponse);
+    } catch (parseError) {
+      // Si le JSON n'est pas directement parsable, essayer d'extraire le bloc JSON
+      const jsonMatch = analysisResponse.match(/\[\s*{[\s\S]*}\s*\]/);
+      if (jsonMatch) {
+        try {
+          jsonResponse = JSON.parse(jsonMatch[0]);
+        } catch (innerError) {
+          console.error('Erreur lors du parsing du JSON extrait:', innerError);
+          throw new Error('Format de réponse de l\'API non valide');
+        }
+      } else {
+        console.error('Pas de JSON trouvé dans la réponse de l\'API:', analysisResponse);
+        throw new Error('Pas de JSON trouvé dans la réponse de l\'API');
       }
-    ];
+    }
     
-    return mappings;
+    // Vérifier que nous avons un tableau
+    if (!Array.isArray(jsonResponse)) {
+      throw new Error('La réponse de l\'API n\'est pas un tableau');
+    }
+    
+    // Vérifier la validité des mappings
+    const validMappings = jsonResponse.filter(mapping => 
+      mapping.champ_pdf && 
+      mapping.type && 
+      ['joueur', 'educateur', 'global', 'autre'].includes(mapping.type) && 
+      mapping.mapping
+    );
+    
+    if (validMappings.length === 0) {
+      throw new Error('Aucun mapping valide trouvé dans la réponse de l\'API');
+    }
+    
+    console.log(`${validMappings.length} mappings valides trouvés dans l'analyse`);
+    
+    return validMappings;
     
   } catch (error) {
     console.error('Erreur lors de l\'analyse de la structure du PDF avec Mistral:', error);
@@ -288,15 +225,17 @@ export const analyzePdfStructure = async (extractedText: string): Promise<PdfFie
 };
 
 /**
- * Implémentation réelle de l'appel à l'API Mistral (désactivée pour la démo)
+ * Implémentation de l'appel à l'API Mistral
  */
-async function callMistralApi(prompt: string): Promise<string> {
+async function callMistralApi(prompt: string, apiKey: string): Promise<string> {
   try {
+    console.log('Appel à l\'API Mistral en cours...');
+    
     const response = await fetch(MISTRAL_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${MISTRAL_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: 'mistral-large-latest',
@@ -317,10 +256,15 @@ async function callMistralApi(prompt: string): Promise<string> {
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Erreur API Mistral: ${errorData.error?.message || 'Erreur inconnue'}`);
+      throw new Error(`Erreur API Mistral: ${errorData.error?.message || response.statusText || 'Erreur inconnue'}`);
     }
 
     const data = await response.json();
+    
+    if (!data.choices || data.choices.length === 0 || !data.choices[0].message || !data.choices[0].message.content) {
+      throw new Error('Format de réponse Mistral inattendu');
+    }
+    
     return data.choices[0].message.content;
   } catch (error) {
     console.error('Erreur lors de l\'appel à l\'API Mistral:', error);
