@@ -21,6 +21,7 @@ const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
  */
 export const savePdfAnalysis = (pdfKey: string, mappings: PdfFieldMapping[]): void => {
   try {
+    // Sauvegarder dans localStorage pour accès rapide
     localStorage.setItem(
       `${ANALYSIS_STORAGE_PREFIX}${pdfKey}`, 
       JSON.stringify({
@@ -28,7 +29,23 @@ export const savePdfAnalysis = (pdfKey: string, mappings: PdfFieldMapping[]): vo
         mappings
       })
     );
-    console.log(`Analysis for ${pdfKey} saved to local storage`);
+    
+    // Sauvegarder dans Supabase
+    supabase
+      .from('templates')
+      .update({
+        field_mappings: mappings,
+        analyzed_at: new Date().toISOString()
+      })
+      .eq('file_url', `/templates/${pdfKey}`)
+      .then(({ error }) => {
+        if (error) {
+          console.warn('Erreur lors de la sauvegarde de l\'analyse dans Supabase:', error);
+        } else {
+          console.log('Analyse sauvegardée dans Supabase');
+        }
+      });
+      
   } catch (error) {
     console.error('Error saving PDF analysis:', error);
   }
@@ -41,12 +58,36 @@ export const savePdfAnalysis = (pdfKey: string, mappings: PdfFieldMapping[]): vo
  */
 export const getSavedPdfAnalysis = (pdfKey: string): PdfFieldMapping[] | null => {
   try {
+    // D'abord essayer depuis le localStorage pour un accès rapide
     const savedData = localStorage.getItem(`${ANALYSIS_STORAGE_PREFIX}${pdfKey}`);
-    if (!savedData) return null;
+    if (savedData) {
+      const parsedData = JSON.parse(savedData);
+      console.log(`Analyse chargée depuis le localStorage pour ${pdfKey}`);
+      return parsedData.mappings;
+    }
     
-    const parsedData = JSON.parse(savedData);
-    console.log(`Loaded saved analysis for ${pdfKey} from ${parsedData.timestamp}`);
-    return parsedData.mappings;
+    // Si pas dans le localStorage, essayer depuis Supabase
+    const { data, error } = await supabase
+      .from('templates')
+      .select('field_mappings, analyzed_at')
+      .eq('file_url', `/templates/${pdfKey}`)
+      .single();
+      
+    if (error || !data?.field_mappings) {
+      return null;
+    }
+    
+    // Sauvegarder dans le localStorage pour la prochaine fois
+    localStorage.setItem(
+      `${ANALYSIS_STORAGE_PREFIX}${pdfKey}`,
+      JSON.stringify({
+        timestamp: data.analyzed_at,
+        mappings: data.field_mappings
+      })
+    );
+    
+    console.log(`Analyse chargée depuis Supabase pour ${pdfKey}`);
+    return data.field_mappings;
   } catch (error) {
     console.error('Error retrieving PDF analysis:', error);
     return null;

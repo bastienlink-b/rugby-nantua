@@ -5,9 +5,21 @@
 
 import { PDFDocument, PDFField, PDFForm } from 'pdf-lib';
 import { supabase, TEMPLATES_BUCKET, GENERATED_BUCKET } from './SupabaseClient';
+import { createHash } from 'crypto';
 
 // Préfixe utilisé pour stocker les fichiers dans le localStorage
 const PDF_STORAGE_PREFIX = 'pdf_';
+
+// Cache pour les hashes de fichiers
+const fileHashCache = new Map<string, string>();
+
+/**
+ * Calcule le hash SHA-256 d'un contenu PDF
+ */
+const calculatePdfHash = async (content: string): Promise<string> => {
+  const base64Data = content.includes('base64,') ? content.split(',')[1] : content;
+  return createHash('sha256').update(base64Data).digest('hex');
+};
 
 /**
  * Nettoie et normalise le chemin du fichier
@@ -205,13 +217,36 @@ const generateEmptyPdf = async (): Promise<string> => {
  */
 export const storePdf = async (filename: string, content: string, isGenerated = false): Promise<boolean> => {
   const normalizedPath = normalizeFilePath(filename);
+  const fileHash = await calculatePdfHash(content);
+  const fileSize = Math.ceil((content.length * 3) / 4); // Estimation de la taille en bytes
   
   // Stocker dans le localStorage
   localStorage.setItem(`${PDF_STORAGE_PREFIX}${normalizedPath}`, content);
+  fileHashCache.set(normalizedPath, fileHash);
   console.log(`PDF stocké dans le localStorage: ${normalizedPath}`);
   
   // Déterminer le bucket approprié
   const bucketName = isGenerated || filename.startsWith('feuille_match_') ? GENERATED_BUCKET : TEMPLATES_BUCKET;
+  
+  // Si c'est un template, mettre à jour les métadonnées dans la base
+  if (!isGenerated) {
+    try {
+      const { error: updateError } = await supabase
+        .from('templates')
+        .update({
+          file_hash: fileHash,
+          file_size: fileSize,
+          mime_type: 'application/pdf'
+        })
+        .eq('file_url', `/templates/${normalizedPath}`);
+      
+      if (updateError) {
+        console.warn('Erreur lors de la mise à jour des métadonnées du template:', updateError);
+      }
+    } catch (error) {
+      console.warn('Exception lors de la mise à jour des métadonnées du template:', error);
+    }
+  }
   
   // Vérifier la session Supabase
   const { data: session } = await supabase.auth.getSession();
