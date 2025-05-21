@@ -363,3 +363,84 @@ const fillField = (form: PDFForm, fieldName: string, value: any) => {
       }
       console.log(`✓ Case à cocher ${fieldName} définie à: ${!!value}`);
     }
+  } catch (error) {
+    console.warn(`Erreur lors du remplissage du champ ${fieldName}:`, error);
+  }
+};
+
+/**
+ * Remplit automatiquement les champs du formulaire en se basant sur les noms communs
+ */
+const autoFillFormFields = (form: PDFForm, data: PdfData) => {
+  console.log("Tentative de remplissage automatique des champs");
+  
+  // Mappings communs pour les champs globaux
+  const commonMappings = [
+    { field: 'nom_manifestation', value: data.nom_manifestation },
+    { field: 'date_manifestation', value: data.date_manifestation },
+    { field: 'lieu_manifestation', value: data.lieu_manifestation },
+    { field: 'categorie', value: data.categorie },
+    { field: 'club', value: data.club }
+  ];
+
+  // Remplir les champs globaux
+  commonMappings.forEach(mapping => {
+    if (mapping.value) {
+      fillField(form, mapping.field, mapping.value);
+      tryFillVariantFieldNames(form, mapping.field, mapping.value);
+    }
+  });
+
+  // Remplir les champs des joueurs
+  data.joueurs.forEach((joueur, index) => {
+    const playerFields = [
+      { suffix: 'nom', value: joueur.nom },
+      { suffix: 'prenom', value: joueur.prenom },
+      { suffix: 'licence', value: joueur.licence },
+      { suffix: 'avant', value: joueur.est_avant },
+      { suffix: 'arbitre', value: joueur.est_arbitre }
+    ];
+
+    playerFields.forEach(field => {
+      if (field.value !== undefined) {
+        const fieldName = `joueur${index + 1}_${field.suffix}`;
+        fillField(form, fieldName, field.value);
+        tryFillVariantFieldNames(form, fieldName, field.value);
+      }
+    });
+  });
+
+  // Remplir les champs des éducateurs
+  data.educateurs.forEach((educateur, index) => {
+    const coachFields = [
+      { suffix: 'nom', value: educateur.nom },
+      { suffix: 'prenom', value: educateur.prenom },
+      { suffix: 'licence', value: educateur.licence },
+      { suffix: 'diplome', value: educateur.diplome },
+      { suffix: 'referent', value: educateur.est_referent }
+    ];
+
+    coachFields.forEach(field => {
+      if (field.value !== undefined) {
+        const fieldName = `educateur${index + 1}_${field.suffix}`;
+        fillField(form, fieldName, field.value);
+        tryFillVariantFieldNames(form, fieldName, field.value);
+      }
+    });
+  });
+};
+
+/**
+ * Récupère une valeur à partir d'un mapping et des données
+ */
+const getValueFromMapping = (mapping: string, data: PdfData): any => {
+  const parts = mapping.split('.');
+  let value: any = data;
+  
+  for (const part of parts) {
+    if (value === undefined || value === null) return null;
+    value = value[part];
+  }
+  
+  return value;
+};
