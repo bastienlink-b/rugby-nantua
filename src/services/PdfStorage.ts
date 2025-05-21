@@ -31,6 +31,21 @@ const normalizeFilePath = (filename: string): string => {
     normalized = segments.join('/');
   }
   
+  // Éviter l'inclusion d'un bucket dans le chemin d'un autre bucket
+  // Par exemple, éviter generated_pdfs/modeles/file.pdf
+  if (normalized.includes(TEMPLATES_BUCKET) && normalized.includes(GENERATED_BUCKET)) {
+    // Garder seulement la partie après le dernier nom de bucket trouvé
+    if (normalized.lastIndexOf(TEMPLATES_BUCKET) > normalized.lastIndexOf(GENERATED_BUCKET)) {
+      normalized = normalized.substring(normalized.lastIndexOf(TEMPLATES_BUCKET) + TEMPLATES_BUCKET.length).replace(/^\/+/, '');
+    } else {
+      normalized = normalized.substring(normalized.lastIndexOf(GENERATED_BUCKET) + GENERATED_BUCKET.length).replace(/^\/+/, '');
+    }
+  } else if (normalized.includes(TEMPLATES_BUCKET) && !normalized.startsWith(TEMPLATES_BUCKET)) {
+    normalized = normalized.substring(normalized.lastIndexOf(TEMPLATES_BUCKET) + TEMPLATES_BUCKET.length).replace(/^\/+/, '');
+  } else if (normalized.includes(GENERATED_BUCKET) && !normalized.startsWith(GENERATED_BUCKET)) {
+    normalized = normalized.substring(normalized.lastIndexOf(GENERATED_BUCKET) + GENERATED_BUCKET.length).replace(/^\/+/, '');
+  }
+  
   return normalized;
 };
 
@@ -68,8 +83,6 @@ export const getPdf = async (filename: string): Promise<string | null> => {
     // Inclut le chemin original, et des variations avec des préfixes courants
     const possiblePaths = [
       normalizedPath,                                       // Chemin tel quel
-      `templates/${normalizedPath.split('/').pop()}`,       // Dans dossier templates
-      `modeles/${normalizedPath.split('/').pop()}`,         // Dans dossier modeles
       `${normalizedPath.split('/').pop()}`,                 // Juste le nom du fichier
     ];
     
