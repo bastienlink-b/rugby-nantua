@@ -101,7 +101,14 @@ const Players: React.FC = () => {
       
       return matchesSearch && matchesCategory;
     })
-    .sort((a, b) => a.lastName.localeCompare(b.lastName, 'fr-FR')); // Tri alphabétique par nom
+    .sort((a, b) => {
+      // Tri d'abord par nom de famille
+      const lastNameCompare = a.lastName.localeCompare(b.lastName, 'fr-FR');
+      if (lastNameCompare !== 0) return lastNameCompare;
+      
+      // Si même nom de famille, trier par prénom
+      return a.firstName.localeCompare(b.firstName, 'fr-FR');
+    });
 
   return (
     <div>
