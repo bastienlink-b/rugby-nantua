@@ -24,7 +24,7 @@ export const initializeStorage = async () => {
     // First, check if the user is authenticated
     const { data: session } = await supabase.auth.getSession();
     if (!session?.session) {
-      console.warn('Utilisateur non authentifié. Certaines fonctionnalités de stockage pourraient être limitées.');
+      console.log('Utilisateur non authentifié. Mode anonyme activé.');
       console.log('Les opérations de stockage utiliseront localStorage comme solution de repli.');
       return; // Sortir tôt si non authentifié
     } else {

@@ -1,18 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Plus, Search, Edit, Trash2, FileText, Upload, Check, X, Info, HelpCircle, Eye, AlertCircle, BarChart, PlusCircle, MinusCircle, Save, Loader } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, FileText, UploadCloud, X, Download, Tag, ArrowLeft, ListChecks, Loader } from 'lucide-react';
+import { analyzePdfStructure, extractTextFromPdf, PdfFieldMapping, savePdfAnalysis } from '../services/MistralApiService';
 import PdfViewer from '../components/PdfViewer';
-import { getPublicUrl, storePdf } from '../services/PdfStorage';
-import { extractTextFromPdf, analyzePdfStructure, PdfFieldMapping, hasAnalysis, getSavedPdfAnalysis, savePdfAnalysis } from '../services/MistralApiService';
+import { getPdf, storePdf, cleanPdfFormFields } from '../services/PdfStorage';
 
 interface TemplateFormData {
-  id?: string;
   name: string;
   description: string;
   fileUrl: string;
   ageCategoryIds: string[];
-  file?: File | null;
-  fieldMappings?: PdfFieldMapping[];
+  fieldMappings: PdfFieldMapping[];
 }
 
 const initialFormData: TemplateFormData = {
@@ -20,46 +18,27 @@ const initialFormData: TemplateFormData = {
   description: '',
   fileUrl: '',
   ageCategoryIds: [],
-  file: null,
-  fieldMappings: [],
+  fieldMappings: []
 };
 
-enum ModalType {
-  None = 'none',
-  AddEdit = 'addEdit',
-  Preview = 'preview',
-  FieldMapping = 'fieldMapping',
-  Analysis = 'analysis',
-  Help = 'help'
-}
-
-const MappingFieldTypes = [
-  { value: 'global', label: 'Global', description: 'Informations générales (date, lieu, etc.)' },
-  { value: 'joueur', label: 'Joueur', description: 'Informations sur un joueur' },
-  { value: 'educateur', label: 'Éducateur', description: 'Informations sur un entraîneur/éducateur' },
-  { value: 'autre', label: 'Autre', description: 'Autres types d\'informations' },
-];
-
 const Templates: React.FC = () => {
-  const { templates, ageCategories, addTemplate, updateTemplate, deleteTemplate } = useAppContext();
-  const [modalType, setModalType] = useState<ModalType>(ModalType.None);
+  const { templates, ageCategories, addTemplate, updateTemplate, deleteTemplate, refreshData } = useAppContext();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isFieldMappingOpen, setIsFieldMappingOpen] = useState(false);
   const [formData, setFormData] = useState<TemplateFormData>(initialFormData);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string>('');
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [currentStep, setCurrentStep] = useState<string>('upload'); // upload, analyze, mapping
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [selectedTemplateData, setSelectedTemplateData] = useState<any>(null);
+  const [extractedText, setExtractedText] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [analysisResults, setAnalysisResults] = useState<{extractedText: string, mappings: PdfFieldMapping[]}>({
-    extractedText: '',
-    mappings: []
-  });
-  const [editingMappingIndex, setEditingMappingIndex] = useState<number | null>(null);
-  const [newMapping, setNewMapping] = useState<PdfFieldMapping>({
-    champ_pdf: '',
-    type: 'global',
-    mapping: ''
-  });
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -68,18 +47,6 @@ const Templates: React.FC = () => {
       ...formData,
       [name]: value,
     });
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files[0]) {
-      setFormData({
-        ...formData,
-        file: files[0],
-        // Use a temporary URL for preview, but don't set fileUrl yet
-        // fileUrl will be set after upload during form submission
-      });
-    }
   };
 
   const handleCategoryToggle = (categoryId: string) => {
@@ -102,17 +69,15 @@ const Templates: React.FC = () => {
 
   const resetForm = () => {
     setFormData(initialFormData);
-    setSelectedTemplate(null);
-    setPdfUrl(null);
-    setErrorMessage(null);
+    setEditingTemplateId(null);
+    setUploadedFile(null);
+    setUploadedFileName('');
+    setUploadProgress(0);
     setIsAnalyzing(false);
-    setAnalysisResults({
-      extractedText: '',
-      mappings: []
-    });
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setAnalyzeError(null);
+    setExtractedText('');
+    setPdfPreviewUrl(null);
+    setCurrentStep('upload');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -125,299 +90,287 @@ const Templates: React.FC = () => {
     }
     
     try {
-      setIsLoading(true);
-      setErrorMessage(null);
-      
-      let fileUrl = formData.fileUrl;
-      
-      // If a new file was selected, upload it
-      if (formData.file) {
-        const fileName = formData.file.name;
-        const reader = new FileReader();
-        
-        // Read file as data URL and upload
-        const fileDataPromise = new Promise<string>((resolve, reject) => {
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            resolve(dataUrl);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(formData.file as File);
-        });
-        
-        const dataUrl = await fileDataPromise;
-        
-        // Store the PDF in Supabase or locally
-        const uploaded = await storePdf(fileName, dataUrl);
-        if (uploaded) {
-          fileUrl = `/templates/${fileName}`;
-          console.log(`File uploaded successfully: ${fileUrl}`);
-        } else {
-          throw new Error("Failed to upload PDF file");
-        }
-      }
-      
-      // Create or update template
-      const templateData = {
-        name: formData.name,
-        description: formData.description,
-        fileUrl: fileUrl,
-        ageCategoryIds: formData.ageCategoryIds,
-        fieldMappings: formData.fieldMappings || [],
-      };
-      
-      if (formData.id) {
-        await updateTemplate(formData.id, templateData);
-        console.log("Template updated successfully");
+      if (editingTemplateId) {
+        await updateTemplate(editingTemplateId, { ...formData, id: editingTemplateId });
       } else {
-        await addTemplate(templateData);
-        console.log("Template added successfully");
+        await addTemplate(formData);
+      }
+
+      // Successful save - close modal and reset form
+      setIsModalOpen(false);
+      resetForm();
+      
+      // Refresh the templates data
+      refreshData();
+    } catch (error) {
+      console.error('Error saving template:', error);
+      alert(`Erreur lors de l'enregistrement du modèle: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
+    }
+  };
+
+  const handleEdit = (template: TemplateFormData & { id: string }) => {
+    setFormData(template);
+    setEditingTemplateId(template.id);
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (window.confirm(`Êtes-vous sûr de vouloir supprimer le modèle "${name}" ?`)) {
+      try {
+        await deleteTemplate(id);
         
-        // Automatically analyze the new template's PDF
-        if (fileUrl) {
-          setTimeout(() => {
-            analyzePdf(fileUrl, templateData.name);
-          }, 500);
+        // Reset preview if the deleted template was being previewed
+        if (selectedTemplate === id) {
+          setSelectedTemplate(null);
+          setSelectedTemplateData(null);
+          setPdfPreviewUrl(null);
         }
+      } catch (error) {
+        console.error('Error deleting template:', error);
+        alert(`Erreur lors de la suppression du modèle: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      
+      // Check if it's a PDF
+      if (file.type !== 'application/pdf') {
+        alert('Veuillez sélectionner un fichier PDF.');
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
       }
       
-      // Close modal and reset form
-      setModalType(ModalType.None);
-      resetForm();
-    } catch (error) {
-      console.error("Error submitting template:", error);
-      setErrorMessage(`Erreur: ${error instanceof Error ? error.message : 'Une erreur est survenue'}`);
-    } finally {
-      setIsLoading(false);
+      // Check file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Le fichier est trop volumineux. Taille maximale: 5MB');
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+
+      // Set the file
+      setUploadedFile(file);
+      setUploadedFileName(file.name);
     }
   };
 
-  const handleEdit = (template: any) => {
-    setFormData({
-      id: template.id,
-      name: template.name,
-      description: template.description || '',
-      fileUrl: template.fileUrl,
-      ageCategoryIds: template.ageCategoryIds,
-      fieldMappings: template.fieldMappings || [],
-    });
-    setSelectedTemplate(template.id);
-    setModalType(ModalType.AddEdit);
-  };
-
-  const handleDelete = (id: string) => {
-    if (window.confirm('Êtes-vous sûr de vouloir supprimer ce modèle ?')) {
-      deleteTemplate(id);
-    }
-  };
-
-  const handlePreview = (template: any) => {
-    setFormData({
-      id: template.id,
-      name: template.name,
-      description: template.description || '',
-      fileUrl: template.fileUrl,
-      ageCategoryIds: template.ageCategoryIds,
-      fieldMappings: template.fieldMappings || [],
-    });
-    setSelectedTemplate(template.id);
-    setPdfUrl(template.fileUrl);
-    setModalType(ModalType.Preview);
-  };
-
-  const handleEditMapping = (index: number) => {
-    setEditingMappingIndex(index);
-    const mapping = formData.fieldMappings?.[index] || {
-      champ_pdf: '',
-      type: 'global',
-      mapping: ''
-    };
-    setNewMapping({ ...mapping });
-  };
-
-  const handleDeleteMapping = (index: number) => {
-    const updatedMappings = formData.fieldMappings?.filter((_, i) => i !== index) || [];
-    setFormData({
-      ...formData,
-      fieldMappings: updatedMappings
-    });
-  };
-
-  const handleAddMapping = () => {
-    setEditingMappingIndex(null);
-    setNewMapping({
-      champ_pdf: '',
-      type: 'global',
-      mapping: ''
-    });
-    setModalType(ModalType.FieldMapping);
-  };
-
-  const handleSaveMapping = () => {
-    // Validation
-    if (!newMapping.champ_pdf || !newMapping.mapping) {
-      alert("Veuillez remplir les champs obligatoires");
+  const handleFileUpload = async () => {
+    if (!uploadedFile) {
+      alert('Veuillez sélectionner un fichier à téléverser.');
       return;
     }
-
-    const updatedMappings = [...(formData.fieldMappings || [])];
-
-    if (editingMappingIndex !== null) {
-      // Update existing
-      updatedMappings[editingMappingIndex] = newMapping;
-    } else {
-      // Add new
-      updatedMappings.push(newMapping);
-    }
-
-    setFormData({
-      ...formData,
-      fieldMappings: updatedMappings
-    });
-    
-    setEditingMappingIndex(null);
-    setNewMapping({
-      champ_pdf: '',
-      type: 'global',
-      mapping: ''
-    });
-    setModalType(ModalType.AddEdit);
-  };
-
-  const analyzePdf = async (pdfUrl: string, templateName: string) => {
-    console.log(`Analyzing template: ${templateName}, URL: ${pdfUrl}`);
-    setIsAnalyzing(true);
-    setErrorMessage(null);
-    setModalType(ModalType.Analysis);
     
     try {
-      // Extract filename from URL
-      const fileName = pdfUrl.split('/').pop();
-      
-      if (!fileName) {
-        throw new Error('Nom de fichier invalide');
-      }
-      
-      // Check if we have saved analysis
-      if (hasAnalysis(fileName)) {
-        console.log('Using saved analysis');
-        const savedMappings = getSavedPdfAnalysis(fileName);
-        
-        if (savedMappings) {
-          setAnalysisResults({
-            extractedText: 'Texte chargé depuis l\'analyse précédente',
-            mappings: savedMappings
-          });
+      setUploadProgress(10);
+
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        if (e.target && e.target.result) {
+          const fileContent = e.target.result as string;
+          setUploadProgress(50);
           
-          // Update form data with mappings
-          setFormData(prev => ({
-            ...prev,
-            fieldMappings: savedMappings
-          }));
+          // Store the PDF in local storage or Supabase
+          const fileName = `${Date.now()}_${uploadedFileName}`;
+          const storedSuccessfully = await storePdf(fileName, fileContent);
           
-          setIsAnalyzing(false);
-          return;
+          if (storedSuccessfully) {
+            setUploadProgress(100);
+            
+            // Update form data with the file URL
+            setFormData({
+              ...formData,
+              fileUrl: `/templates/${fileName}`
+            });
+            
+            // Set PDF preview
+            setPdfPreviewUrl(fileContent);
+
+            // Move to analysis step
+            setCurrentStep('analyze');
+          } else {
+            console.error('Error storing PDF');
+            alert('Erreur lors du stockage du PDF.');
+          }
         }
+      };
+      reader.readAsDataURL(uploadedFile);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert(`Erreur lors du téléversement: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
+      setUploadProgress(0);
+    }
+  };
+
+  const handleAnalyzePdf = async () => {
+    try {
+      setIsAnalyzing(true);
+      setAnalyzeError(null);
+
+      // If we have a PDF preview URL, we can use that
+      if (pdfPreviewUrl) {
+        console.log('Analyzing PDF...');
+        
+        // Extract text from PDF
+        const text = await extractTextFromPdf(pdfPreviewUrl);
+        setExtractedText(text);
+        console.log('Text extracted, analyzing structure...');
+        
+        // Use Mistral API to analyze PDF structure
+        const fieldMappings = await analyzePdfStructure(text);
+        console.log('Field mappings:', fieldMappings);
+        
+        // Save field mappings to form data
+        setFormData(prev => ({
+          ...prev,
+          fieldMappings
+        }));
+        
+        // If we have a file name, save the analysis
+        if (uploadedFileName) {
+          savePdfAnalysis(uploadedFileName, fieldMappings);
+        }
+        
+        // Move to field mapping step
+        setIsFieldMappingOpen(true);
+      } else {
+        setAnalyzeError('Aucun PDF à analyser. Veuillez d\'abord téléverser un fichier.');
       }
-      
-      // Get PDF data
-      const pdfContent = await getPdfForAnalysis(pdfUrl);
-      
-      if (!pdfContent) {
-        throw new Error('Impossible de récupérer le contenu du PDF');
-      }
-      
-      // Step 1: Extract text from PDF using Mistral
-      console.log('Extraction du texte du PDF...');
-      const extractedText = await extractTextFromPdf(pdfContent);
-      
-      // Step 2: Analyze PDF structure based on extracted text
-      console.log('Analyse de la structure du PDF...');
-      const mappings = await analyzePdfStructure(extractedText);
-      
-      // Save analysis
-      savePdfAnalysis(fileName, mappings);
-      
-      // Update UI
-      setAnalysisResults({
-        extractedText,
-        mappings
-      });
-      
-      // Update form data with mappings
-      setFormData(prev => ({
-        ...prev,
-        fieldMappings: mappings
-      }));
-      
     } catch (error) {
       console.error('Error analyzing PDF:', error);
-      setErrorMessage(`Erreur d'analyse: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
+      setAnalyzeError(`Erreur lors de l'analyse du PDF: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Helper to get PDF content for analysis
-  const getPdfForAnalysis = async (url: string): Promise<string> => {
-    // For remote URLs
-    if (url.startsWith('http')) {
-      try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      } catch (error) {
-        console.error('Error fetching remote PDF:', error);
-        throw new Error('Impossible de télécharger le PDF distant');
-      }
-    }
-    
-    // For local files (/templates/file.pdf)
-    try {
-      const fullUrl = getPublicUrl(url.split('/').pop() || '');
-      if (fullUrl) {
-        const response = await fetch(fullUrl);
-        const blob = await response.blob();
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      }
-      throw new Error('URL non valide pour le PDF');
-    } catch (error) {
-      console.error('Error fetching local PDF:', error);
-      throw new Error('Impossible de charger le PDF local');
-    }
-  };
-
-  // Sort templates by name
-  const sortedTemplates = [...templates].sort((a, b) => 
-    a.name.localeCompare(b.name, 'fr-FR')
-  );
-
-  // Sort age categories by name with specific order (M6, M8, M10, etc.)
+  // Sort categories alphabetically
   const sortedCategories = [...ageCategories].sort((a, b) => {
-    // Extract age numbers from category names
+    // Extract the number from the category name (e.g., M6 -> 6)
     const getAgeNumber = (name: string) => {
       const match = name.match(/M(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
     };
     
-    return getAgeNumber(a.name) - getAgeNumber(b.name);
+    const ageA = getAgeNumber(a.name);
+    const ageB = getAgeNumber(b.name);
+    
+    return ageA - ageB;
   });
-
+  
   // Filter templates by search term
-  const filteredTemplates = sortedTemplates.filter(template =>
-    template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (template.description || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredTemplates = templates
+    .filter(template => 
+      template.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (template.description && template.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr-FR'));
+
+  // Handle template selection
+  const handleTemplateSelect = async (templateId: string) => {
+    try {
+      setSelectedTemplate(templateId);
+      
+      const template = templates.find(t => t.id === templateId);
+      setSelectedTemplateData(template);
+      
+      if (template && template.fileUrl) {
+        // Get filename
+        const fileName = template.fileUrl.split('/').pop();
+        if (!fileName) {
+          console.error('Invalid template URL:', template.fileUrl);
+          return;
+        }
+        
+        // Get PDF
+        const pdfContent = await getPdf(fileName);
+        if (pdfContent) {
+          setPdfPreviewUrl(pdfContent);
+        } else {
+          console.error('PDF content not found');
+        }
+      }
+    } catch (error) {
+      console.error('Error selecting template:', error);
+    }
+  };
+
+  // Reset current template selection
+  const handleClosePreview = () => {
+    setSelectedTemplate(null);
+    setSelectedTemplateData(null);
+    setPdfPreviewUrl(null);
+  };
+
+  // Get category names for display
+  const getCategoryNames = (categoryIds: string[]) => {
+    return categoryIds
+      .map(id => ageCategories.find(cat => cat.id === id))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (!a || !b) return 0;
+        
+        // Extract the number from the category name (e.g., M6 -> 6)
+        const getAgeNumber = (name: string) => {
+          const match = name.match(/M(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        };
+        
+        const ageA = getAgeNumber(a.name);
+        const ageB = getAgeNumber(b.name);
+        
+        return ageA - ageB;
+      })
+      .map(cat => cat?.name || 'Inconnu')
+      .join(', ');
+  };
+
+  const updateFieldMapping = (index: number, key: string, value: any) => {
+    setFormData(prev => {
+      const mappings = [...prev.fieldMappings];
+      mappings[index] = {
+        ...mappings[index],
+        [key]: value,
+      };
+      return {
+        ...prev,
+        fieldMappings: mappings,
+      };
+    });
+  };
+
+  const removeFieldMapping = (index: number) => {
+    setFormData(prev => {
+      const mappings = [...prev.fieldMappings];
+      mappings.splice(index, 1);
+      return {
+        ...prev,
+        fieldMappings: mappings,
+      };
+    });
+  };
+
+  const addFieldMapping = () => {
+    setFormData(prev => {
+      return {
+        ...prev,
+        fieldMappings: [
+          ...prev.fieldMappings,
+          {
+            champ_pdf: '',
+            type: 'global',
+            mapping: '',
+          }
+        ],
+      };
+    });
+  };
 
   return (
     <div>
@@ -425,19 +378,21 @@ const Templates: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Modèles</h1>
           <p className="text-gray-600 mt-1">
-            Gérez les modèles de feuilles de match
+            Gérez les modèles de feuilles de match et leur configuration
           </p>
         </div>
-        <button
-          onClick={() => {
-            resetForm();
-            setModalType(ModalType.AddEdit);
-          }}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md flex items-center"
-        >
-          <Plus size={18} className="mr-1" />
-          <span>Nouveau modèle</span>
-        </button>
+        <div className="flex space-x-2">
+          <button
+            onClick={() => {
+              resetForm();
+              setIsUploadModalOpen(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md flex items-center"
+          >
+            <UploadCloud size={18} className="mr-1" />
+            <span>Téléverser</span>
+          </button>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -455,143 +410,586 @@ const Templates: React.FC = () => {
         </div>
       </div>
 
-      {filteredTemplates.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTemplates.map((template) => {
-            // Get category names
-            const categoryNames = template.ageCategoryIds
-              .map(id => ageCategories.find(cat => cat.id === id)?.name || '')
-              .filter(Boolean)
-              .sort()
-              .join(', ');
-
-            // Check if template has field mappings
-            const hasFieldMappings = template.fieldMappings && template.fieldMappings.length > 0;
-              
-            return (
-              <div key={template.id} className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                <div className="p-6">
-                  <div className="flex justify-between items-start">
-                    <h3 className="text-lg font-semibold text-gray-900 truncate">
-                      {template.name}
-                    </h3>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handlePreview(template)}
-                        className="text-blue-600 hover:text-blue-900"
-                        title="Aperçu"
-                      >
-                        <Eye size={18} />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(template)}
-                        className="text-indigo-600 hover:text-indigo-900"
-                        title="Modifier"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(template.id)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Supprimer"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* Template filename */}
-                  <div className="mt-2 flex items-center">
-                    <FileText size={15} className="text-gray-400 mr-1.5 flex-shrink-0" />
-                    <span className="text-sm text-gray-500 truncate">
-                      {template.fileUrl.split('/').pop()}
-                    </span>
-                    
-                    {/* Analysis status badge - moved below filename */}
-                  </div>
-                  
-                  {/* Analysis badge */}
-                  <div className="mt-1.5">
-                    {hasFieldMappings ? (
-                      <div className="flex">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          <Check size={12} className="mr-1" />
-                          Analyse ({template.fieldMappings!.length} champs)
-                        </span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-lg shadow-sm overflow-hidden h-full">
+            <div className="p-4 border-b">
+              <h2 className="text-lg font-medium text-gray-900">Modèles disponibles</h2>
+            </div>
+            
+            {filteredTemplates.length > 0 ? (
+              <div className="divide-y divide-gray-200">
+                {filteredTemplates.map((template) => (
+                  <div 
+                    key={template.id}
+                    className={`p-4 cursor-pointer transition-colors ${
+                      selectedTemplate === template.id ? 'bg-blue-50' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => handleTemplateSelect(template.id)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {template.name}
+                        </p>
+                        <div className="mt-1 flex items-start text-sm text-gray-500">
+                          <Tag size={14} className="mr-1 mt-0.5 flex-shrink-0" />
+                          <span>{getCategoryNames(template.ageCategoryIds)}</span>
+                        </div>
+                        {template.description && (
+                          <p className="mt-1 text-sm text-gray-500">
+                            {template.description}
+                          </p>
+                        )}
+                        <div className="mt-2 flex items-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            template.fieldMappings && template.fieldMappings.length > 0
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {template.fieldMappings && template.fieldMappings.length > 0
+                              ? `${template.fieldMappings.length} champs configurés`
+                              : 'Pas de champs configurés'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="ml-4 flex-shrink-0 flex">
                         <button
-                          onClick={() => analyzePdf(template.fileUrl, template.name)}
-                          className="ml-2 text-xs text-blue-600 hover:text-blue-800"
-                          title="Relancer l'analyse"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEdit(template);
+                          }}
+                          className="text-gray-400 hover:text-indigo-600 mr-2"
                         >
-                          Relancer
+                          <Edit size={18} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(template.id, template.name);
+                          }}
+                          className="text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 size={18} />
                         </button>
                       </div>
-                    ) : (
-                      <div className="flex">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          <AlertCircle size={12} className="mr-1" />
-                          Non analysé
-                        </span>
-                        <button
-                          onClick={() => analyzePdf(template.fileUrl, template.name)}
-                          className="ml-2 text-xs text-blue-600 hover:text-blue-800"
-                          title="Analyser"
-                        >
-                          Analyser
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {template.description && (
-                    <p className="mt-2 text-sm text-gray-600">{template.description}</p>
-                  )}
-                  
-                  {categoryNames && (
-                    <div className="mt-3">
-                      <p className="text-xs text-gray-500">Catégories: {categoryNames}</p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
-            );
-          })}
+            ) : (
+              <div className="p-8 text-center">
+                <FileText size={48} className="mx-auto text-gray-300 mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun modèle trouvé</h3>
+                <p className="text-gray-500 mb-6">
+                  {searchTerm
+                    ? "Aucun modèle ne correspond aux critères de recherche."
+                    : "Commencez par téléverser votre premier modèle de feuille de match."}
+                </p>
+                {!searchTerm && (
+                  <button
+                    onClick={() => {
+                      resetForm();
+                      setIsUploadModalOpen(true);
+                    }}
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    <UploadCloud size={18} className="mr-2" />
+                    Téléverser un modèle
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="text-center py-12 bg-white rounded-lg shadow-sm">
-          <FileText size={64} className="mx-auto text-gray-300 mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun modèle trouvé</h3>
-          <p className="text-gray-500 mb-6">
-            {searchTerm
-              ? "Aucun modèle ne correspond aux critères de recherche."
-              : "Commencez par ajouter votre premier modèle de feuille de match."}
-          </p>
-          {!searchTerm && (
-            <button
-              onClick={() => {
-                resetForm();
-                setModalType(ModalType.AddEdit);
-              }}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus size={18} className="mr-2" />
-              Ajouter un modèle
-            </button>
+
+        <div className="lg:col-span-2">
+          {pdfPreviewUrl ? (
+            <div className="bg-white rounded-lg shadow-sm overflow-hidden h-full flex flex-col">
+              <div className="p-4 border-b flex justify-between items-center">
+                <div className="flex items-center">
+                  <button 
+                    onClick={handleClosePreview}
+                    className="mr-3 text-gray-500 hover:text-gray-700"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                  <h2 className="font-medium">
+                    {selectedTemplateData?.name || 'Aperçu du modèle'}
+                  </h2>
+                </div>
+                {selectedTemplateData && (
+                  <div className="flex">
+                    <button
+                      onClick={() => handleEdit(selectedTemplateData)}
+                      className="mr-2 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 flex items-center hover:bg-gray-50"
+                    >
+                      <Edit size={16} className="mr-1" />
+                      Éditer
+                    </button>
+                    <button
+                      onClick={() => {
+                        const a = document.createElement('a');
+                        a.href = pdfPreviewUrl;
+                        a.download = selectedTemplateData.name.replace(/\s+/g, '_') + '.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                      }}
+                      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 flex items-center hover:bg-gray-50"
+                    >
+                      <Download size={16} className="mr-1" />
+                      Télécharger
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="p-4 flex-grow overflow-auto">
+                <PdfViewer url={pdfPreviewUrl} height="600px" />
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center h-full min-h-[600px]">
+              <FileText size={64} className="text-gray-300 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Aperçu du modèle</h3>
+              <p className="text-gray-500 text-center max-w-md mb-6">
+                Sélectionnez un modèle dans la liste pour afficher son aperçu ici.
+                Vous pourrez ensuite l'éditer ou télécharger le PDF.
+              </p>
+              <button
+                onClick={() => {
+                  resetForm();
+                  setIsUploadModalOpen(true);
+                }}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                <UploadCloud size={18} className="mr-2" />
+                Téléverser un nouveau modèle
+              </button>
+            </div>
           )}
         </div>
-      )}
+      </div>
 
-      {/* Modal for Add/Edit */}
-      {modalType === ModalType.AddEdit && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto mt-10 overflow-hidden">
+      {/* Upload Modal */}
+      {isUploadModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b">
               <h3 className="text-lg font-medium text-gray-900">
-                {formData.id ? 'Modifier le modèle' : 'Ajouter un modèle'}
+                {currentStep === 'upload' && 'Téléverser un modèle'}
+                {currentStep === 'analyze' && 'Analyser le modèle'}
               </h3>
               <button
                 onClick={() => {
-                  setModalType(ModalType.None);
+                  setIsUploadModalOpen(false);
+                  resetForm();
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {currentStep === 'upload' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nom du modèle
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleInputChange}
+                      required
+                      className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Ex: Feuille M14 Tournoi"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Description (optionnelle)
+                    </label>
+                    <textarea
+                      name="description"
+                      value={formData.description}
+                      onChange={handleInputChange}
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Description du modèle et de son usage"
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Catégories d'âge (au moins une)
+                    </label>
+                    <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
+                      {sortedCategories.map((category) => (
+                        <label key={category.id} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={formData.ageCategoryIds.includes(category.id)}
+                            onChange={() => handleCategoryToggle(category.id)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">
+                            {category.name} - {category.description}
+                          </span>
+                        </label>
+                      ))}
+                      {formData.ageCategoryIds.length === 0 && (
+                        <p className="text-sm text-red-500 mt-1">
+                          Veuillez sélectionner au moins une catégorie
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Fichier PDF
+                    </label>
+                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                      <div className="space-y-1 text-center">
+                        <div className="flex flex-col items-center">
+                          <UploadCloud size={36} className="text-gray-400" />
+                          <p className="text-sm text-gray-600 mt-1">
+                            {uploadedFileName ? (
+                              <span className="text-blue-600 font-medium">{uploadedFileName}</span>
+                            ) : (
+                              <span>Cliquez pour sélectionner un fichier PDF</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500">PDF jusqu'à 5MB</p>
+                        </div>
+                        <input
+                          id="file-upload"
+                          name="file-upload"
+                          type="file"
+                          className="sr-only"
+                          accept="application/pdf"
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                        />
+                        <div className="flex justify-center mt-2">
+                          <label
+                            htmlFor="file-upload"
+                            className="cursor-pointer px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                          >
+                            {uploadedFileName ? 'Changer de fichier' : 'Choisir un fichier'}
+                          </label>
+                          {uploadedFileName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUploadedFile(null);
+                                setUploadedFileName('');
+                                if (fileInputRef.current) {
+                                  fileInputRef.current.value = '';
+                                }
+                              }}
+                              className="ml-2 px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-red-600 bg-white hover:bg-gray-50"
+                            >
+                              Supprimer
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {uploadProgress > 0 && (
+                      <div className="mt-2">
+                        <div className="h-2 bg-gray-200 rounded-full">
+                          <div
+                            className="h-2 bg-blue-600 rounded-full"
+                            style={{ width: `${uploadProgress}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {currentStep === 'analyze' && (
+                <div className="space-y-4">
+                  <div className="mb-4">
+                    <div className="border rounded-md overflow-hidden">
+                      <div className="p-3 bg-gray-50 border-b">
+                        <h4 className="font-medium text-sm text-gray-700">Aperçu du modèle</h4>
+                      </div>
+                      <div className="p-3 max-h-48 overflow-auto">
+                        <PdfViewer url={pdfPreviewUrl || ''} height="200px" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-medium text-sm text-gray-700">Extraction du texte et analyse</h4>
+                      <button 
+                        type="button" 
+                        onClick={handleAnalyzePdf}
+                        disabled={isAnalyzing}
+                        className={`text-xs px-2 py-1 rounded-md ${
+                          isAnalyzing 
+                            ? 'bg-blue-100 text-blue-600 cursor-not-allowed' 
+                            : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                        }`}
+                      >
+                        {isAnalyzing ? (
+                          <span className="flex items-center">
+                            <Loader size={12} className="animate-spin mr-1" />
+                            Analyse en cours...
+                          </span>
+                        ) : (
+                          'Lancer l\'analyse'
+                        )}
+                      </button>
+                    </div>
+                    <div className="mt-1 bg-gray-50 rounded-md p-3 text-sm text-gray-700">
+                      {isAnalyzing ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader size={24} className="animate-spin mr-2 text-blue-500" />
+                          <p>Analyse du PDF en cours...</p>
+                        </div>
+                      ) : analyzeError ? (
+                        <div className="text-red-500">
+                          {analyzeError}
+                        </div>
+                      ) : formData.fieldMappings && formData.fieldMappings.length > 0 ? (
+                        <div>
+                          <p className="mb-2 text-green-600 font-medium">
+                            Analyse terminée! {formData.fieldMappings.length} champs identifiés.
+                          </p>
+                          <button 
+                            type="button" 
+                            onClick={() => setIsFieldMappingOpen(true)}
+                            className="text-sm px-3 py-1.5 border border-gray-300 rounded-md bg-white hover:bg-gray-50"
+                          >
+                            <ListChecks size={14} className="mr-1 inline" />
+                            Voir et modifier les champs
+                          </button>
+                        </div>
+                      ) : (
+                        <p>
+                          Cliquez sur "Lancer l'analyse" pour commencer l'extraction des champs du PDF. 
+                          Cette opération utilise l'API Mistral pour analyser le modèle.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 flex justify-end space-x-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Annuler
+                </button>
+                
+                {currentStep === 'upload' && (
+                  <button
+                    type="button"
+                    onClick={handleFileUpload}
+                    disabled={!uploadedFile || !formData.name || formData.ageCategoryIds.length === 0}
+                    className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                      !uploadedFile || !formData.name || formData.ageCategoryIds.length === 0
+                        ? 'bg-blue-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    Continuer
+                  </button>
+                )}
+                
+                {currentStep === 'analyze' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isFieldMappingOpen) {
+                        setIsUploadModalOpen(false);
+                        setIsFieldMappingOpen(false);
+                        setIsModalOpen(true);
+                      } else {
+                        setIsFieldMappingOpen(true);
+                      }
+                    }}
+                    disabled={formData.fieldMappings.length === 0}
+                    className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                      formData.fieldMappings.length === 0
+                        ? 'bg-blue-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    Continuer
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Field Mapping Modal */}
+      {isFieldMappingOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h3 className="text-lg font-medium text-gray-900">
+                Champs détectés dans le PDF
+              </h3>
+              <button
+                onClick={() => {
+                  setIsFieldMappingOpen(false);
+                  setIsUploadModalOpen(false);
+                  setIsModalOpen(true);
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[70vh] overflow-y-auto">
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-4">
+                  Vérifiez et modifiez les correspondances entre les champs du PDF et les données de l'application.
+                  Ces correspondances seront utilisées pour remplir automatiquement les feuilles de match.
+                </p>
+                <div className="flex justify-end mb-2">
+                  <button
+                    type="button"
+                    onClick={addFieldMapping}
+                    className="text-sm px-3 py-1.5 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center"
+                  >
+                    <Plus size={14} className="mr-1" />
+                    Ajouter un champ
+                  </button>
+                </div>
+              </div>
+              
+              <div className="border rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Champ PDF
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Type
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Correspondance
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {formData.fieldMappings.map((mapping, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={mapping.champ_pdf}
+                            onChange={(e) => updateFieldMapping(index, 'champ_pdf', e.target.value)}
+                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                            placeholder="Nom du champ"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          <select
+                            value={mapping.type}
+                            onChange={(e) => updateFieldMapping(index, 'type', e.target.value)}
+                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                          >
+                            <option value="global">Global</option>
+                            <option value="joueur">Joueur</option>
+                            <option value="educateur">Éducateur</option>
+                            <option value="autre">Autre</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={mapping.mapping}
+                            onChange={(e) => updateFieldMapping(index, 'mapping', e.target.value)}
+                            className="w-full border border-gray-300 rounded-md py-1 px-2 text-sm"
+                            placeholder="Correspondance (ex: joueur.nom)"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          <button
+                            type="button"
+                            onClick={() => removeFieldMapping(index)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {formData.fieldMappings.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-4 text-sm text-center text-gray-500">
+                          Aucun champ détecté. Cliquez sur "Ajouter un champ" pour en créer un manuellement.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="p-6 bg-gray-50 border-t flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFieldMappingOpen(false);
+                  setIsUploadModalOpen(true);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                Retour
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFieldMappingOpen(false);
+                  setIsUploadModalOpen(false);
+                  setIsModalOpen(true);
+                }}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                Continuer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit/Create Template Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h3 className="text-lg font-medium text-gray-900">
+                {editingTemplateId ? 'Modifier le modèle' : 'Finaliser le modèle'}
+              </h3>
+              <button
+                onClick={() => {
+                  setIsModalOpen(false);
                   resetForm();
                 }}
                 className="text-gray-400 hover:text-gray-500"
@@ -613,7 +1011,6 @@ const Templates: React.FC = () => {
                     onChange={handleInputChange}
                     required
                     className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Ex: Tournoi M14 Standard"
                   />
                 </div>
 
@@ -627,720 +1024,92 @@ const Templates: React.FC = () => {
                     onChange={handleInputChange}
                     rows={3}
                     className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Description du modèle et de son utilisation"
                   ></textarea>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fichier PDF
-                    </label>
-                    {formData.id ? (
-                      <div className="flex items-center">
-                        <FileText size={18} className="text-gray-500 mr-2" />
-                        <span className="text-gray-600 text-sm truncate">
-                          {formData.fileUrl.split('/').pop()}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Catégories d'âge (au moins une)
+                  </label>
+                  <div className="mt-2 space-y-2 border border-gray-300 rounded-md p-3">
+                    {sortedCategories.map((category) => (
+                      <label key={category.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={formData.ageCategoryIds.includes(category.id)}
+                          onChange={() => handleCategoryToggle(category.id)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">
+                          {category.name} - {category.description}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="ml-3 px-3 py-1 text-xs border border-gray-300 rounded-md hover:bg-gray-50"
-                        >
-                          Remplacer
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-gray-400 transition-colors">
-                          <div className="space-y-1 text-center">
-                            <Upload size={36} className="mx-auto text-gray-400" />
-                            <div className="flex text-sm text-gray-600">
-                              <label
-                                htmlFor="file-upload"
-                                className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500"
-                              >
-                                <span>Choisir un fichier</span>
-                                <input
-                                  id="file-upload"
-                                  name="file"
-                                  type="file"
-                                  accept=".pdf"
-                                  className="sr-only"
-                                  ref={fileInputRef}
-                                  onChange={handleFileChange}
-                                  required={!formData.id}
-                                />
-                              </label>
-                              <p className="pl-1">ou glissez-déposez</p>
-                            </div>
-                            <p className="text-xs text-gray-500">
-                              PDF uniquement, 5 MB maximum
-                            </p>
-                          </div>
-                        </div>
-                        {formData.file && (
-                          <div className="mt-2 flex items-center text-sm text-gray-600">
-                            <FileText size={16} className="mr-1" />
-                            {formData.file.name} ({Math.round(formData.file.size / 1024)} KB)
-                          </div>
-                        )}
-                      </div>
+                      </label>
+                    ))}
+                    {formData.ageCategoryIds.length === 0 && (
+                      <p className="text-sm text-red-500 mt-1">
+                        Veuillez sélectionner au moins une catégorie
+                      </p>
                     )}
-                    {/* Hidden file input for replacement */}
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      className="hidden"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                    />
                   </div>
+                </div>
 
+                {pdfPreviewUrl && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Catégories d'âge
+                      Aperçu du modèle PDF
                     </label>
-                    <div className="mt-1 space-y-2 border border-gray-300 rounded-md p-3 max-h-40 overflow-y-auto">
-                      {sortedCategories.map((category) => (
-                        <label key={category.id} className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={formData.ageCategoryIds.includes(category.id)}
-                            onChange={() => handleCategoryToggle(category.id)}
-                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          />
-                          <span className="ml-2 text-sm text-gray-700">
-                            {category.name} - {category.description}
-                          </span>
-                        </label>
-                      ))}
-                      {formData.ageCategoryIds.length === 0 && (
-                        <p className="text-sm text-red-500">
-                          Veuillez sélectionner au moins une catégorie
-                        </p>
-                      )}
+                    <div className="border rounded-md overflow-hidden max-h-48">
+                      <PdfViewer url={pdfPreviewUrl} height="180px" />
                     </div>
                   </div>
-                </div>
+                )}
 
-                {/* Field Mappings Section */}
-                <div className="mt-4 border rounded-lg p-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <div>
-                      <h3 className="text-md font-medium text-gray-900">Champs du modèle</h3>
-                      <p className="text-sm text-gray-500">
-                        Correspondances entre les champs du PDF et les données de l'application
-                      </p>
-                    </div>
-
-                    <div className="flex space-x-2">
+                {formData.fieldMappings && formData.fieldMappings.length > 0 && (
+                  <div>
+                    <div className="flex justify-between items-center">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Correspondance des champs
+                      </label>
                       <button
                         type="button"
-                        onClick={() => setModalType(ModalType.Help)}
-                        className="text-gray-600 hover:text-gray-800"
-                        title="Aide"
+                        onClick={() => setIsFieldMappingOpen(true)}
+                        className="text-xs text-blue-600 hover:text-blue-800"
                       >
-                        <HelpCircle size={18} />
-                      </button>
-                      
-                      {formData.fileUrl && (
-                        <button
-                          type="button"
-                          onClick={() => analyzePdf(formData.fileUrl, formData.name)}
-                          className={`text-blue-600 hover:text-blue-800 flex items-center ${isAnalyzing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          disabled={isAnalyzing}
-                          title="Analyser le PDF avec Mistral AI"
-                        >
-                          {isAnalyzing ? (
-                            <>
-                              <Loader size={18} className="mr-1 animate-spin" />
-                              <span>Analyse...</span>
-                            </>
-                          ) : (
-                            <>
-                              <BarChart size={18} className="mr-1" />
-                              <span>Analyser</span>
-                            </>
-                          )}
-                        </button>
-                      )}
-                      
-                      <button
-                        type="button"
-                        onClick={handleAddMapping}
-                        className="text-green-600 hover:text-green-800 flex items-center"
-                        title="Ajouter un champ manuellement"
-                      >
-                        <PlusCircle size={18} className="mr-1" />
-                        <span>Ajouter</span>
+                        Modifier
                       </button>
                     </div>
-                  </div>
-
-                  {/* Mappings Table */}
-                  {formData.fieldMappings && formData.fieldMappings.length > 0 ? (
-                    <div className="bg-white rounded-md border overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Champ PDF
-                            </th>
-                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Type
-                            </th>
-                            <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Correspondance
-                            </th>
-                            <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {formData.fieldMappings.map((mapping, index) => (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                {mapping.champ_pdf}
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
-                                <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                  mapping.type === 'joueur' 
-                                    ? 'bg-blue-100 text-blue-800' 
-                                    : mapping.type === 'educateur'
-                                      ? 'bg-purple-100 text-purple-800'
-                                      : mapping.type === 'global'
-                                        ? 'bg-green-100 text-green-800'
-                                        : 'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {mapping.type.charAt(0).toUpperCase() + mapping.type.slice(1)}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                {mapping.mapping}
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEditMapping(index)}
-                                  className="text-indigo-600 hover:text-indigo-900 mr-3"
-                                  title="Modifier"
-                                >
-                                  <Edit size={16} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteMapping(index)}
-                                  className="text-red-600 hover:text-red-900"
-                                  title="Supprimer"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <BarChart size={48} className="mx-auto text-gray-300 mb-2" />
-                      <p className="text-sm text-gray-500 mb-4">
-                        Aucun champ défini. Cliquez sur "Analyser" pour détecter les champs automatiquement
-                        ou ajoutez-les manuellement.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {errorMessage && (
-                  <div className="bg-red-50 border border-red-200 text-red-800 rounded-md p-3">
-                    <div className="flex items-center">
-                      <AlertCircle size={18} className="text-red-600 mr-2" />
-                      <span>{errorMessage}</span>
+                    
+                    <div className="text-xs text-gray-500 border border-gray-200 rounded-md p-2 bg-gray-50">
+                      <p>{formData.fieldMappings.length} champs configurés</p>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="mt-6 flex justify-end space-x-3 pt-6 border-t">
+              <div className="mt-6 flex justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => {
-                    setModalType(ModalType.None);
+                    setIsModalOpen(false);
                     resetForm();
                   }}
-                  className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                  disabled={isLoading}
+                  className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   className={`px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-                    formData.ageCategoryIds.length === 0 || isLoading 
-                      ? 'bg-blue-400 cursor-not-allowed' 
+                    !formData.name || formData.ageCategoryIds.length === 0 || !formData.fileUrl
+                      ? 'bg-blue-400 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-700'
-                  } flex items-center`}
-                  disabled={formData.ageCategoryIds.length === 0 || isLoading}
+                  }`}
+                  disabled={!formData.name || formData.ageCategoryIds.length === 0 || !formData.fileUrl}
                 >
-                  {isLoading && (
-                    <Loader size={18} className="mr-2 animate-spin" />
-                  )}
-                  {formData.id ? 'Mettre à jour' : 'Ajouter'}
+                  {editingTemplateId ? 'Mettre à jour' : 'Enregistrer'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for PDF Preview */}
-      {modalType === ModalType.Preview && pdfUrl && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto mt-10 overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-medium text-gray-900">
-                Aperçu du modèle: {formData.name}
-              </h3>
-              <button
-                onClick={() => {
-                  setModalType(ModalType.None);
-                  setPdfUrl(null);
-                }}
-                className="text-gray-400 hover:text-gray-500"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <div className="p-4">
-              <PdfViewer url={pdfUrl} height="600px" />
-            </div>
-            <div className="p-4 bg-gray-50 border-t flex justify-end">
-              <button
-                onClick={() => {
-                  setModalType(ModalType.None);
-                  setPdfUrl(null);
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for Field Mapping Editing */}
-      {modalType === ModalType.FieldMapping && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-medium text-gray-900">
-                {editingMappingIndex !== null ? 'Modifier champ' : 'Ajouter champ'}
-              </h3>
-              <button
-                onClick={() => setModalType(ModalType.AddEdit)}
-                className="text-gray-400 hover:text-gray-500"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Champ dans le PDF *
-                </label>
-                <input
-                  type="text"
-                  value={newMapping.champ_pdf}
-                  onChange={(e) => setNewMapping({...newMapping, champ_pdf: e.target.value})}
-                  className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Ex: Nom du joueur, Date du tournoi"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Type de données *
-                </label>
-                <select 
-                  value={newMapping.type}
-                  onChange={(e) => setNewMapping({...newMapping, type: e.target.value as any})}
-                  className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  {MappingFieldTypes.map(type => (
-                    <option key={type.value} value={type.value}>
-                      {type.label} - {type.description}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Correspondance *
-                </label>
-                <input
-                  type="text"
-                  value={newMapping.mapping}
-                  onChange={(e) => setNewMapping({...newMapping, mapping: e.target.value})}
-                  className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Ex: joueur.nom, tournoi.date"
-                  required
-                />
-                <div className="mt-2 text-xs text-gray-500">
-                  <p className="font-medium">Formats recommandés :</p>
-                  <ul className="list-disc list-inside mt-1">
-                    <li>Global: <code>tournoi.date</code>, <code>tournoi.lieu</code></li>
-                    <li>Joueur: <code>joueur.nom</code>, <code>joueur.prenom</code>, <code>joueur.licence</code></li>
-                    <li>Éducateur: <code>educateur.nom</code>, <code>educateur.prenom</code></li>
-                  </ul>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Valeurs possibles (optionnel)
-                </label>
-                <input
-                  type="text"
-                  value={newMapping.valeur_possible?.join(', ') || ''}
-                  onChange={(e) => setNewMapping({
-                    ...newMapping, 
-                    valeur_possible: e.target.value ? e.target.value.split(',').map(v => v.trim()) : undefined
-                  })}
-                  className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Ex: Oui, Non"
-                />
-                <p className="mt-1 text-xs text-gray-500">Séparez les valeurs par des virgules</p>
-              </div>
-              
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="obligatoire"
-                  checked={newMapping.obligatoire || false}
-                  onChange={(e) => setNewMapping({...newMapping, obligatoire: e.target.checked})}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="obligatoire" className="ml-2 text-sm text-gray-700">
-                  Champ obligatoire
-                </label>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Format (optionnel)
-                </label>
-                <input
-                  type="text"
-                  value={newMapping.format || ''}
-                  onChange={(e) => setNewMapping({...newMapping, format: e.target.value || undefined})}
-                  className="w-full border border-gray-300 rounded-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Ex: DD/MM/YYYY"
-                />
-              </div>
-            </div>
-            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => setModalType(ModalType.AddEdit)}
-                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveMapping}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-              >
-                <Save size={16} className="inline-block mr-1" />
-                Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for PDF Analysis */}
-      {modalType === ModalType.Analysis && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl mx-auto mt-10 mb-10 overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-medium text-gray-900">
-                Analyse du modèle: {formData.name}
-              </h3>
-              <button
-                onClick={() => {
-                  setModalType(ModalType.AddEdit);
-                }}
-                className="text-gray-400 hover:text-gray-500"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              {isAnalyzing ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Loader size={48} className="text-blue-500 animate-spin mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Analyse en cours...</h3>
-                  <p className="text-gray-500 text-center max-w-md">
-                    L'API Mistral est en train d'analyser votre PDF et d'identifier les champs.
-                    Ce processus peut prendre quelques instants.
-                  </p>
-                </div>
-              ) : errorMessage ? (
-                <div className="flex flex-col items-center justify-center py-8">
-                  <AlertCircle size={48} className="text-red-500 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Erreur lors de l'analyse</h3>
-                  <p className="text-red-600 text-center mb-4">{errorMessage}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setErrorMessage(null);
-                      setModalType(ModalType.AddEdit);
-                    }}
-                    className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-                  >
-                    Retour à l'édition
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Résultats de l'analyse */}
-                  <div>
-                    <h4 className="text-md font-medium text-gray-900 mb-2">
-                      Champs détectés {analysisResults.mappings.length > 0 ? `(${analysisResults.mappings.length})` : ''}
-                    </h4>
-                    
-                    {analysisResults.mappings.length > 0 ? (
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div className="border rounded-md overflow-hidden">
-                          <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Champ PDF
-                                </th>
-                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Type
-                                </th>
-                                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                  Correspondance
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                              {analysisResults.mappings.filter(m => m.type === 'global' || m.type === 'autre').map((mapping, index) => (
-                                <tr key={`global-${index}`} className="hover:bg-gray-50">
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                    {mapping.champ_pdf}
-                                  </td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm">
-                                    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                      mapping.type === 'global' 
-                                        ? 'bg-green-100 text-green-800' 
-                                        : 'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {mapping.type.charAt(0).toUpperCase() + mapping.type.slice(1)}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                    {mapping.mapping}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        
-                        <div>
-                          <div className="border rounded-md overflow-hidden">
-                            <table className="min-w-full divide-y divide-gray-200">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Champ PDF
-                                  </th>
-                                  <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Type
-                                  </th>
-                                  <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Correspondance
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-white divide-y divide-gray-200">
-                                {analysisResults.mappings.filter(m => m.type === 'joueur' || m.type === 'educateur').map((mapping, index) => (
-                                  <tr key={`persona-${index}`} className="hover:bg-gray-50">
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                      {mapping.champ_pdf}
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm">
-                                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                        mapping.type === 'joueur' 
-                                          ? 'bg-blue-100 text-blue-800' 
-                                          : 'bg-purple-100 text-purple-800'
-                                      }`}>
-                                        {mapping.type.charAt(0).toUpperCase() + mapping.type.slice(1)}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                                      {mapping.mapping}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                          
-                          {/* Exemples de valeurs si disponibles */}
-                          {analysisResults.mappings.some(m => m.valeur_possible && m.valeur_possible.length > 0) && (
-                            <div className="mt-4 border rounded-md overflow-hidden">
-                              <div className="bg-gray-50 px-4 py-2 border-b">
-                                <h5 className="text-sm font-medium text-gray-700">Exemples de valeurs détectées</h5>
-                              </div>
-                              <div className="p-4 space-y-2">
-                                {analysisResults.mappings.filter(m => m.valeur_possible && m.valeur_possible.length > 0).map((mapping, index) => (
-                                  <div key={`example-${index}`} className="text-sm">
-                                    <span className="font-medium">{mapping.champ_pdf}:</span>{' '}
-                                    <span className="text-gray-600">{mapping.valeur_possible!.join(', ')}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-yellow-50 p-4 rounded-md flex items-start">
-                        <AlertCircle size={20} className="text-yellow-600 mt-0.5 mr-3 flex-shrink-0" />
-                        <div>
-                          <h5 className="text-sm font-medium text-yellow-800">Aucun champ détecté</h5>
-                          <p className="mt-1 text-sm text-yellow-700">
-                            L'analyse n'a pas permis de détecter des champs dans ce PDF. Il peut s'agir d'un PDF scanné 
-                            ou d'un format peu structuré. Vous pouvez ajouter manuellement les champs ou réessayer l'analyse.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => setModalType(ModalType.AddEdit)}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-                disabled={isAnalyzing}
-              >
-                Utiliser ces résultats
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for Help */}
-      {modalType === ModalType.Help && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-auto overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-medium text-gray-900">
-                Aide - Mapping des champs PDF
-              </h3>
-              <button
-                onClick={() => setModalType(ModalType.AddEdit)}
-                className="text-gray-400 hover:text-gray-500"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <div className="p-6 space-y-6">
-              <div>
-                <h4 className="text-md font-medium text-gray-900 mb-2">Qu'est-ce que le mapping des champs?</h4>
-                <p className="text-gray-600">
-                  Le mapping des champs permet de faire correspondre les champs présents dans votre PDF avec les données de l'application.
-                  Cela permet de remplir automatiquement les champs du PDF avec les informations des joueurs, entraîneurs et tournois.
-                </p>
-              </div>
-
-              <div>
-                <h4 className="text-md font-medium text-gray-900 mb-2">Types de champs</h4>
-                <ul className="space-y-3">
-                  <li className="flex items-start">
-                    <span className="inline-flex items-center justify-center px-2 py-1 mr-3 text-xs font-bold leading-none rounded-full bg-green-100 text-green-800">
-                      Global
-                    </span>
-                    <div>
-                      <p className="text-gray-600">
-                        Informations générales sur le tournoi comme le nom, la date, le lieu, etc.
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">
-                        <strong>Exemples de mapping:</strong> tournoi.nom, tournoi.date, tournoi.lieu
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="inline-flex items-center justify-center px-2 py-1 mr-3 text-xs font-bold leading-none rounded-full bg-blue-100 text-blue-800">
-                      Joueur
-                    </span>
-                    <div>
-                      <p className="text-gray-600">
-                        Informations sur un joueur comme son nom, prénom, numéro de licence, etc.
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">
-                        <strong>Exemples de mapping:</strong> joueur.nom, joueur.prenom, joueur.licence, joueur.est_avant, joueur.est_arbitre
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="inline-flex items-center justify-center px-2 py-1 mr-3 text-xs font-bold leading-none rounded-full bg-purple-100 text-purple-800">
-                      Éducateur
-                    </span>
-                    <div>
-                      <p className="text-gray-600">
-                        Informations sur un entraîneur comme son nom, prénom, numéro de licence, diplôme, etc.
-                      </p>
-                      <p className="text-sm text-gray-500 mt-1">
-                        <strong>Exemples de mapping:</strong> educateur.nom, educateur.prenom, educateur.licence, educateur.diplome, educateur.est_referent
-                      </p>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="text-md font-medium text-gray-900 mb-2">Comment ça marche?</h4>
-                <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                  <li>Importer un nouveau modèle PDF ou sélectionner un modèle existant</li>
-                  <li>Cliquer sur le bouton "Analyser" pour que l'IA détecte les champs</li>
-                  <li>Vérifier et ajuster les correspondances proposées par l'IA</li>
-                  <li>Ajouter manuellement des champs si nécessaire</li>
-                  <li>Enregistrer le modèle avec ses correspondances</li>
-                </ol>
-                <p className="mt-3 text-gray-600">
-                  Lors de la génération d'une feuille de match, les données seront automatiquement placées 
-                  aux bons endroits dans le PDF selon les correspondances que vous avez définies.
-                </p>
-              </div>
-            </div>
-            <div className="p-4 bg-gray-50 border-t flex justify-end">
-              <button
-                type="button"
-                onClick={() => setModalType(ModalType.AddEdit)}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-              >
-                Compris
-              </button>
-            </div>
           </div>
         </div>
       )}

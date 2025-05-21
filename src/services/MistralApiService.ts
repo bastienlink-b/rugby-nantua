@@ -77,24 +77,14 @@ export const extractTextFromPdf = async (pdfData: string): Promise<string> => {
       pdfContent = pdfData.split('base64,')[1];
     }
     
-    // Préparation des données pour envoi à l'API Mistral
-    const prompt = `
-    Tu es un expert en extraction de texte et analyse de PDFs. 
-    Je vais te fournir le contenu d'un PDF encodé en base64 (celle-ci a été tronquée pour cette simulation).
-    Ton objectif est d'extraire tout le texte visible du PDF, en préservant autant que possible la structure.
-    Représente les champs de formulaire, tableaux et zones de texte de manière claire.
-    
-    Base64 du PDF: ${pdfContent.substring(0, 5000)}... (tronqué)
-    `;
-    
-    console.log('Envoi de la requête à l\'API Mistral pour l\'extraction de texte...');
-    
-    // Appel à l'API Mistral pour l'extraction de texte
+    // Get the Mistral API key
     const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY;
     
     if (!MISTRAL_API_KEY) {
       throw new Error('Clé API Mistral non définie. Veuillez définir VITE_MISTRAL_API_KEY dans votre fichier .env');
     }
+    
+    console.log('Envoi de la requête à l\'API Mistral pour l\'extraction de texte...');
     
     const extractedText = await callMistralApi(`
       Voici le contenu d'un PDF encodé en base64 (tronqué).
@@ -162,14 +152,14 @@ export const analyzePdfStructure = async (extractedText: string): Promise<PdfFie
     Ne fournis que le JSON, sans autre texte autour.
     `;
     
-    console.log('Envoi de la requête à l\'API Mistral pour l\'analyse de structure...');
-    
-    // Appel à l'API Mistral
+    // Get the Mistral API key
     const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY;
     
     if (!MISTRAL_API_KEY) {
       throw new Error('Clé API Mistral non définie. Veuillez définir VITE_MISTRAL_API_KEY dans votre fichier .env');
     }
+    
+    console.log('Envoi de la requête à l\'API Mistral pour l\'analyse de structure...');
     
     const analysisResponse = await callMistralApi(prompt, MISTRAL_API_KEY);
     
