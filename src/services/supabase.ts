@@ -49,7 +49,7 @@ export const getPlayers = async () => {
   try {
     const { data, error } = await supabase
       .from('players')
-      .select('*, age_categories(*)')
+      .select('*')
       .order('last_name', { ascending: true });
     
     if (error) {
@@ -72,7 +72,7 @@ export const getPlayersByCategory = async (categoryId: string) => {
   console.log(`Fetching players for category ${categoryId}`);
   const { data, error } = await supabase
     .from('players')
-    .select('*, age_categories(*)')
+    .select('*')
     .eq('age_category_id', categoryId)
     .order('last_name', { ascending: true });
   
@@ -153,27 +153,50 @@ export const deletePlayer = async (id: string) => {
 export const getCoaches = async () => {
   console.log('Fetching coaches from Supabase');
   try {
-    const { data, error } = await supabase
+    const { data: coaches, error: coachesError } = await supabase
       .from('coaches')
-      .select(`
-        *,
-        coach_categories(
-          age_category_id,
-          age_categories(*)
-        )
-      `)
+      .select('*')
       .order('last_name', { ascending: true });
     
-    if (error) {
-      console.error('Error fetching coaches:', error);
-      if (error.code === 'PGRST301' || error.message.includes('JWT')) {
-        console.warn('Authentication error when fetching coaches. Check if you are logged in.');
-      }
-      throw error;
+    if (coachesError) {
+      console.error('Error fetching coaches:', coachesError);
+      throw coachesError;
+    }
+
+    if (!coaches || coaches.length === 0) {
+      console.log('No coaches found');
+      return [];
+    }
+
+    console.log(`Successfully fetched ${coaches.length} coaches`);
+    
+    // Now fetch coach categories for all coaches at once
+    const coachIds = coaches.map(coach => coach.id);
+    const { data: coachCategories, error: categoriesError } = await supabase
+      .from('coach_categories')
+      .select('coach_id, age_category_id')
+      .in('coach_id', coachIds);
+      
+    if (categoriesError) {
+      console.error('Error fetching coach categories:', categoriesError);
+      throw categoriesError;
     }
     
-    console.log(`Successfully fetched ${data?.length || 0} coaches`);
-    return data || [];
+    console.log(`Fetched ${coachCategories?.length || 0} coach-category relationships`);
+    
+    // Map categories to coaches
+    const coachesWithCategories = coaches.map(coach => {
+      const categories = coachCategories
+        ?.filter(cc => cc.coach_id === coach.id)
+        .map(cc => cc.age_category_id) || [];
+        
+      return {
+        ...coach,
+        coach_categories: categories.map(cat_id => ({ age_category_id: cat_id }))
+      };
+    });
+    
+    return coachesWithCategories;
   } catch (error) {
     console.error('Exception during coaches fetch:', error);
     throw error;
@@ -243,25 +266,11 @@ export const addCoach = async (coach: {
     
     console.log('Coach categories added successfully');
     
-    // Fetch the coach with relationships to return complete data
-    const { data: completeCoach, error: fetchError } = await supabase
-      .from('coaches')
-      .select(`
-        *,
-        coach_categories(
-          age_category_id,
-          age_categories(*)
-        )
-      `)
-      .eq('id', coachId)
-      .single();
-      
-    if (fetchError) {
-      console.error('Error fetching complete coach data:', fetchError);
-      return coachData[0]; // Return partial data if full data fetch fails
-    }
-    
-    return completeCoach;
+    // Return coach with categories
+    return {
+      ...coachData[0],
+      coach_categories: categoryIds.map(id => ({ age_category_id: id }))
+    };
   }
   
   throw new Error('Failed to create coach');
@@ -323,25 +332,11 @@ export const updateCoach = async (
   
   console.log('Coach categories updated successfully');
   
-  // Fetch the coach with relationships to return complete data
-  const { data: completeCoach, error: fetchError } = await supabase
-    .from('coaches')
-    .select(`
-      *,
-      coach_categories(
-        age_category_id,
-        age_categories(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-    
-  if (fetchError) {
-    console.error('Error fetching complete coach data:', fetchError);
-    return coachData?.[0]; // Return partial data if full data fetch fails
-  }
-  
-  return completeCoach;
+  // Return coach with updated categories
+  return {
+    ...(coachData?.[0] || {}),
+    coach_categories: categoryIds.map(id => ({ age_category_id: id }))
+  };
 };
 
 export const deleteCoach = async (id: string) => {
@@ -363,24 +358,55 @@ export const deleteCoach = async (id: string) => {
 // Tournaments
 export const getTournaments = async () => {
   console.log('Fetching tournaments from Supabase');
-  const { data, error } = await supabase
-    .from('tournaments')
-    .select(`
-      *,
-      tournament_categories(
-        age_category_id,
-        age_categories(*)
-      )
-    `)
-    .order('date', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching tournaments:', error);
+  try {
+    const { data: tournaments, error: tournamentError } = await supabase
+      .from('tournaments')
+      .select('*')
+      .order('date', { ascending: false });
+    
+    if (tournamentError) {
+      console.error('Error fetching tournaments:', tournamentError);
+      throw tournamentError;
+    }
+    
+    if (!tournaments || tournaments.length === 0) {
+      console.log('No tournaments found');
+      return [];
+    }
+    
+    console.log(`Successfully fetched ${tournaments.length} tournaments`);
+    
+    // Now fetch tournament categories for all tournaments at once
+    const tournamentIds = tournaments.map(tournament => tournament.id);
+    const { data: tournamentCategories, error: categoriesError } = await supabase
+      .from('tournament_categories')
+      .select('tournament_id, age_category_id')
+      .in('tournament_id', tournamentIds);
+      
+    if (categoriesError) {
+      console.error('Error fetching tournament categories:', categoriesError);
+      throw categoriesError;
+    }
+    
+    console.log(`Fetched ${tournamentCategories?.length || 0} tournament-category relationships`);
+    
+    // Map categories to tournaments
+    const tournamentsWithCategories = tournaments.map(tournament => {
+      const categories = tournamentCategories
+        ?.filter(tc => tc.tournament_id === tournament.id)
+        .map(tc => tc.age_category_id) || [];
+        
+      return {
+        ...tournament,
+        tournament_categories: categories.map(cat_id => ({ age_category_id: cat_id }))
+      };
+    });
+    
+    return tournamentsWithCategories;
+  } catch (error) {
+    console.error('Exception during tournaments fetch:', error);
     throw error;
   }
-  
-  console.log(`Successfully fetched ${data?.length || 0} tournaments`);
-  return data || [];
 };
 
 export const getTournamentsByCategory = async (categoryId: string) => {
@@ -444,25 +470,11 @@ export const addTournament = async (tournament: {
     
     console.log('Tournament categories added successfully');
     
-    // Fetch the tournament with relationships to return complete data
-    const { data: completeTournament, error: fetchError } = await supabase
-      .from('tournaments')
-      .select(`
-        *,
-        tournament_categories(
-          age_category_id,
-          age_categories(*)
-        )
-      `)
-      .eq('id', tournamentId)
-      .single();
-      
-    if (fetchError) {
-      console.error('Error fetching complete tournament data:', fetchError);
-      return tournamentData[0]; // Return partial data if full data fetch fails
-    }
-    
-    return completeTournament;
+    // Return tournament with categories
+    return {
+      ...tournamentData[0],
+      tournament_categories: categoryIds.map(id => ({ age_category_id: id }))
+    };
   }
   
   throw new Error('Failed to create tournament');
@@ -522,25 +534,11 @@ export const updateTournament = async (
   
   console.log('Tournament categories updated successfully');
   
-  // Fetch the tournament with relationships to return complete data
-  const { data: completeTournament, error: fetchError } = await supabase
-    .from('tournaments')
-    .select(`
-      *,
-      tournament_categories(
-        age_category_id,
-        age_categories(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-    
-  if (fetchError) {
-    console.error('Error fetching complete tournament data:', fetchError);
-    return tournamentData?.[0]; // Return partial data if full data fetch fails
-  }
-  
-  return completeTournament;
+  // Return tournament with updated categories
+  return {
+    ...(tournamentData?.[0] || {}),
+    tournament_categories: categoryIds.map(id => ({ age_category_id: id }))
+  };
 };
 
 export const deleteTournament = async (id: string) => {
@@ -562,24 +560,55 @@ export const deleteTournament = async (id: string) => {
 // Templates
 export const getTemplates = async () => {
   console.log('Fetching templates from Supabase');
-  const { data, error } = await supabase
-    .from('templates')
-    .select(`
-      *,
-      template_categories(
-        age_category_id,
-        age_categories(*)
-      )
-    `)
-    .order('name', { ascending: true });
-  
-  if (error) {
-    console.error('Error fetching templates:', error);
+  try {
+    const { data: templates, error: templateError } = await supabase
+      .from('templates')
+      .select('*')
+      .order('name', { ascending: true });
+    
+    if (templateError) {
+      console.error('Error fetching templates:', templateError);
+      throw templateError;
+    }
+    
+    if (!templates || templates.length === 0) {
+      console.log('No templates found');
+      return [];
+    }
+    
+    console.log(`Successfully fetched ${templates.length} templates`);
+    
+    // Now fetch template categories for all templates at once
+    const templateIds = templates.map(template => template.id);
+    const { data: templateCategories, error: categoriesError } = await supabase
+      .from('template_categories')
+      .select('template_id, age_category_id')
+      .in('template_id', templateIds);
+      
+    if (categoriesError) {
+      console.error('Error fetching template categories:', categoriesError);
+      throw categoriesError;
+    }
+    
+    console.log(`Fetched ${templateCategories?.length || 0} template-category relationships`);
+    
+    // Map categories to templates
+    const templatesWithCategories = templates.map(template => {
+      const categories = templateCategories
+        ?.filter(tc => tc.template_id === template.id)
+        .map(tc => tc.age_category_id) || [];
+        
+      return {
+        ...template,
+        template_categories: categories.map(cat_id => ({ age_category_id: cat_id }))
+      };
+    });
+    
+    return templatesWithCategories;
+  } catch (error) {
+    console.error('Exception during templates fetch:', error);
     throw error;
   }
-  
-  console.log(`Successfully fetched ${data?.length || 0} templates`);
-  return data || [];
 };
 
 export const getTemplatesByCategory = async (categoryId: string) => {
@@ -645,25 +674,11 @@ export const addTemplate = async (template: {
     
     console.log('Template categories added successfully');
     
-    // Fetch the template with relationships to return complete data
-    const { data: completeTemplate, error: fetchError } = await supabase
-      .from('templates')
-      .select(`
-        *,
-        template_categories(
-          age_category_id,
-          age_categories(*)
-        )
-      `)
-      .eq('id', templateId)
-      .single();
-      
-    if (fetchError) {
-      console.error('Error fetching complete template data:', fetchError);
-      return templateData[0]; // Return partial data if full data fetch fails
-    }
-    
-    return completeTemplate;
+    // Return template with categories
+    return {
+      ...templateData[0],
+      template_categories: categoryIds.map(id => ({ age_category_id: id }))
+    };
   }
   
   throw new Error('Failed to create template');
@@ -725,25 +740,11 @@ export const updateTemplate = async (
   
   console.log('Template categories updated successfully');
   
-  // Fetch the template with relationships to return complete data
-  const { data: completeTemplate, error: fetchError } = await supabase
-    .from('templates')
-    .select(`
-      *,
-      template_categories(
-        age_category_id,
-        age_categories(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-    
-  if (fetchError) {
-    console.error('Error fetching complete template data:', fetchError);
-    return templateData?.[0]; // Return partial data if full data fetch fails
-  }
-  
-  return completeTemplate;
+  // Return template with updated categories
+  return {
+    ...(templateData?.[0] || {}),
+    template_categories: categoryIds.map(id => ({ age_category_id: id }))
+  };
 };
 
 export const deleteTemplate = async (id: string) => {
@@ -765,63 +766,125 @@ export const deleteTemplate = async (id: string) => {
 // Match Sheets
 export const getMatchSheets = async () => {
   console.log('Fetching match sheets from Supabase');
-  const { data, error } = await supabase
-    .from('match_sheets')
-    .select(`
-      *,
-      tournaments(*),
-      templates(*),
-      age_categories(*),
-      coaches(*),
-      match_sheet_players(
-        player_id,
-        players(*)
-      ),
-      match_sheet_coaches(
-        coach_id,
-        coaches(*)
-      )
-    `)
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching match sheets:', error);
+  try {
+    const { data: matchSheets, error: matchSheetsError } = await supabase
+      .from('match_sheets')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (matchSheetsError) {
+      console.error('Error fetching match sheets:', matchSheetsError);
+      throw matchSheetsError;
+    }
+    
+    if (!matchSheets || matchSheets.length === 0) {
+      console.log('No match sheets found');
+      return [];
+    }
+    
+    console.log(`Successfully fetched ${matchSheets.length} match sheets`);
+    
+    // Fetch players for each match sheet
+    const matchSheetIds = matchSheets.map(ms => ms.id);
+    
+    // Get players
+    const { data: matchSheetPlayers, error: playersError } = await supabase
+      .from('match_sheet_players')
+      .select('match_sheet_id, player_id')
+      .in('match_sheet_id', matchSheetIds);
+      
+    if (playersError) {
+      console.error('Error fetching match sheet players:', playersError);
+      throw playersError;
+    }
+    
+    console.log(`Fetched ${matchSheetPlayers?.length || 0} player relationships`);
+    
+    // Get coaches
+    const { data: matchSheetCoaches, error: coachesError } = await supabase
+      .from('match_sheet_coaches')
+      .select('match_sheet_id, coach_id')
+      .in('match_sheet_id', matchSheetIds);
+      
+    if (coachesError) {
+      console.error('Error fetching match sheet coaches:', coachesError);
+      throw coachesError;
+    }
+    
+    console.log(`Fetched ${matchSheetCoaches?.length || 0} coach relationships`);
+    
+    // Map players and coaches to match sheets
+    const completeMatchSheets = matchSheets.map(matchSheet => {
+      const players = matchSheetPlayers
+        ?.filter(msp => msp.match_sheet_id === matchSheet.id)
+        .map(msp => ({ player_id: msp.player_id })) || [];
+        
+      const coaches = matchSheetCoaches
+        ?.filter(msc => msc.match_sheet_id === matchSheet.id)
+        .map(msc => ({ coach_id: msc.coach_id })) || [];
+        
+      return {
+        ...matchSheet,
+        match_sheet_players: players,
+        match_sheet_coaches: coaches
+      };
+    });
+    
+    return completeMatchSheets;
+  } catch (error) {
+    console.error('Exception during match sheets fetch:', error);
     throw error;
   }
-  
-  console.log(`Successfully fetched ${data?.length || 0} match sheets`);
-  return data || [];
 };
 
 export const getMatchSheet = async (id: string) => {
   console.log(`Fetching match sheet ${id}`);
-  const { data, error } = await supabase
-    .from('match_sheets')
-    .select(`
-      *,
-      tournaments(*),
-      templates(*),
-      age_categories(*),
-      coaches(*),
-      match_sheet_players(
-        player_id,
-        players(*)
-      ),
-      match_sheet_coaches(
-        coach_id,
-        coaches(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-  
-  if (error) {
-    console.error('Error fetching match sheet:', error);
+  try {
+    const { data: matchSheet, error: matchSheetError } = await supabase
+      .from('match_sheets')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (matchSheetError) {
+      console.error('Error fetching match sheet:', matchSheetError);
+      throw matchSheetError;
+    }
+    
+    console.log(`Successfully fetched match sheet ${id}`);
+    
+    // Get players for this match sheet
+    const { data: matchSheetPlayers, error: playersError } = await supabase
+      .from('match_sheet_players')
+      .select('player_id')
+      .eq('match_sheet_id', id);
+      
+    if (playersError) {
+      console.error('Error fetching match sheet players:', playersError);
+      throw playersError;
+    }
+    
+    // Get coaches for this match sheet
+    const { data: matchSheetCoaches, error: coachesError } = await supabase
+      .from('match_sheet_coaches')
+      .select('coach_id')
+      .eq('match_sheet_id', id);
+      
+    if (coachesError) {
+      console.error('Error fetching match sheet coaches:', coachesError);
+      throw coachesError;
+    }
+    
+    // Return complete match sheet with relationships
+    return {
+      ...matchSheet,
+      match_sheet_players: matchSheetPlayers || [],
+      match_sheet_coaches: matchSheetCoaches || []
+    };
+  } catch (error) {
+    console.error('Exception during match sheet fetch:', error);
     throw error;
   }
-  
-  console.log(`Successfully fetched match sheet ${id}`);
-  return data;
 };
 
 export const addMatchSheet = async (
@@ -892,33 +955,12 @@ export const addMatchSheet = async (
       console.log(`Added ${coachIds.length} coaches to match sheet`);
     }
     
-    // Fetch the match sheet with relationships to return complete data
-    const { data: completeMatchSheet, error: fetchError } = await supabase
-      .from('match_sheets')
-      .select(`
-        *,
-        tournaments(*),
-        templates(*),
-        age_categories(*),
-        coaches(*),
-        match_sheet_players(
-          player_id,
-          players(*)
-        ),
-        match_sheet_coaches(
-          coach_id,
-          coaches(*)
-        )
-      `)
-      .eq('id', matchSheetId)
-      .single();
-      
-    if (fetchError) {
-      console.error('Error fetching complete match sheet data:', fetchError);
-      return matchSheetData[0]; // Return partial data if full data fetch fails
-    }
-    
-    return completeMatchSheet;
+    // Return match sheet with relationships
+    return {
+      ...matchSheetData[0],
+      match_sheet_players: playerIds.map(id => ({ player_id: id })),
+      match_sheet_coaches: coachIds.map(id => ({ coach_id: id }))
+    };
   }
   
   throw new Error('Failed to create match sheet');
@@ -1018,33 +1060,12 @@ export const updateMatchSheet = async (
     console.log(`Added ${coachIds.length} coaches to match sheet`);
   }
   
-  // Fetch the match sheet with relationships to return complete data
-  const { data: completeMatchSheet, error: fetchError } = await supabase
-    .from('match_sheets')
-    .select(`
-      *,
-      tournaments(*),
-      templates(*),
-      age_categories(*),
-      coaches(*),
-      match_sheet_players(
-        player_id,
-        players(*)
-      ),
-      match_sheet_coaches(
-        coach_id,
-        coaches(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-    
-  if (fetchError) {
-    console.error('Error fetching complete match sheet data:', fetchError);
-    return matchSheetData?.[0]; // Return partial data if full data fetch fails
-  }
-  
-  return completeMatchSheet;
+  // Return match sheet with updated relationships
+  return {
+    ...(matchSheetData?.[0] || {}),
+    match_sheet_players: playerIds.map(id => ({ player_id: id })),
+    match_sheet_coaches: coachIds.map(id => ({ coach_id: id }))
+  };
 };
 
 export const deleteMatchSheet = async (id: string) => {
