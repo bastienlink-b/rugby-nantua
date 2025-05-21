@@ -9,7 +9,7 @@ interface TemplateFormData {
   name: string;
   description: string;
   fileUrl: string;
-  ageCategoryIds: string[]; // Changé de ageCategoryId à ageCategoryIds (array)
+  ageCategoryIds: string[]; 
   fieldMappings?: PdfFieldMapping[];
 }
 
@@ -17,7 +17,7 @@ const initialFormData: TemplateFormData = {
   name: '',
   description: '',
   fileUrl: '',
-  ageCategoryIds: [], // Changé de ageCategoryId à ageCategoryIds (array vide)
+  ageCategoryIds: [],
   fieldMappings: [],
 };
 
@@ -173,6 +173,9 @@ const Templates: React.FC = () => {
           });
           
           setFileUploadStatus('success');
+          
+          // Lancer automatiquement l'analyse du PDF après le téléchargement
+          analyzePdf(fileUrl);
         }
       } catch (error) {
         console.error('Error storing file:', error);
@@ -287,7 +290,7 @@ const Templates: React.FC = () => {
       .join(', ');
   };
 
-  // Fonction modifiée pour analyser le PDF avec Mistral OCR et utiliser les analyses sauvegardées
+  // Fonction pour analyser le PDF avec Mistral OCR et utiliser les analyses sauvegardées
   const analyzePdf = async (templateFileUrl?: string, templateId?: string) => {
     // Utiliser soit l'URL du modèle en cours d'édition, soit l'URL fournie
     const fileUrl = templateFileUrl || formData.fileUrl;
@@ -327,7 +330,15 @@ const Templates: React.FC = () => {
               fieldMappings: existingAnalysis
             });
             setAnalysingTemplateId(null);
-            alert('Mappage des champs mis à jour avec succès pour le modèle.');
+            
+            // Afficher l'éditeur de mappage directement sans fermer le modal
+            setFormData({
+              ...formData,
+              fieldMappings: existingAnalysis,
+            });
+            setShowMappingEditor(true);
+            setOcrStatus('success');
+            return;
           }
         } else {
           // Mise à jour du formulaire
@@ -370,8 +381,19 @@ const Templates: React.FC = () => {
               ...templateToUpdate,
               fieldMappings: mappings
             });
+            
+            // Afficher l'éditeur de mappage sans fermer le modal
+            setFormData({
+              name: templateToUpdate.name,
+              description: templateToUpdate.description || '',
+              fileUrl: templateToUpdate.fileUrl,
+              ageCategoryIds: templateToUpdate.ageCategoryIds || [templateToUpdate.ageCategoryId].filter(Boolean) as string[],
+              fieldMappings: mappings,
+            });
+            setEditingTemplateId(templateId);
+            setIsModalOpen(true);
+            setShowMappingEditor(true);
             setAnalysingTemplateId(null);
-            alert('Mappage des champs ajouté au modèle avec succès.');
           }
         } else {
           // Mise à jour du formulaire
@@ -615,14 +637,14 @@ const Templates: React.FC = () => {
                     <span className="truncate max-w-[250px]">{template.fileUrl.split('/').pop()}</span>
                   </div>
                   
-                  <div className="flex items-center justify-between mt-1">
+                  <div className="flex flex-col mt-1">
                     {template.fieldMappings && template.fieldMappings.length > 0 ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mb-2 w-fit">
                         <Check size={12} className="mr-1" />
                         {template.fieldMappings.length} champs analysés
                       </span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 mb-2 w-fit">
                         <AlertTriangle size={12} className="mr-1" />
                         Aucun champ analysé
                       </span>
@@ -648,6 +670,7 @@ const Templates: React.FC = () => {
                         target="_blank"
                         rel="noopener noreferrer"
                       >
+                        <Eye size={14} className="mr-1 inline" />
                         Aperçu
                       </a>
                     </div>
@@ -681,10 +704,10 @@ const Templates: React.FC = () => {
         </div>
       )}
 
-      {/* Modal avec modifications pour être responsive et avoir des cases à cocher pour les catégories */}
+      {/* Modal pour l'ajout/modification de modèles */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-auto overflow-hidden">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-auto overflow-hidden">
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="text-lg font-medium text-gray-900">
                 {editingTemplateId ? 'Modifier le modèle' : 'Ajouter un modèle'}
@@ -705,79 +728,131 @@ const Templates: React.FC = () => {
               {showMappingEditor ? (
                 <div className="p-4">
                   <div className="mb-4 flex justify-between items-center">
-                    <h3 className="text-lg font-medium text-gray-900">Champs détectés</h3>
+                    <h3 className="text-lg font-medium text-gray-900">Champs détectés par l'IA</h3>
                     <button
                       onClick={() => setShowMappingEditor(false)}
                       className="px-3 py-1 text-sm border border-gray-300 rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
                     >
-                      Retour
+                      Retour à l'édition
                     </button>
                   </div>
 
                   {analyzedFields.length > 0 ? (
                     <div className="space-y-4">
-                      <p className="text-sm text-gray-600">
-                        Validez le mapping des champs et corrigez-le si nécessaire.
+                      <p className="text-sm text-gray-600 mb-4">
+                        L'IA a détecté des champs dans votre PDF. Vérifiez et modifiez les correspondances proposées, puis validez pour les enregistrer avec le modèle.
                       </p>
                       
-                      <div className="overflow-y-auto max-h-96 border border-gray-200 rounded-md p-3">
-                        {analyzedFields.map((field, index) => (
-                          <div key={index} className="p-3 border-b border-gray-100 last:border-0">
-                            <div className="flex justify-between items-center mb-2">
-                              <div className="font-medium text-sm">{field.champ_pdf}</div>
-                              <button
-                                onClick={() => removeFieldMapping(index)}
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <X size={16} />
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">Type</label>
-                                <select
-                                  value={field.type}
-                                  onChange={(e) => updateFieldMapping(index, { type: e.target.value as any })}
-                                  className="w-full text-sm border border-gray-300 rounded-md py-1 px-2"
+                      <div className="overflow-y-auto max-h-96 border border-gray-200 rounded-md p-4">
+                        <div className="grid grid-cols-1 gap-4">
+                          {analyzedFields.map((field, index) => (
+                            <div key={index} className="p-4 border border-gray-200 rounded-md bg-gray-50">
+                              <div className="flex justify-between items-center mb-3">
+                                <div className="flex-1">
+                                  <label className="block text-xs text-gray-500 mb-1">Champ PDF</label>
+                                  <input
+                                    type="text"
+                                    value={field.champ_pdf}
+                                    onChange={(e) => updateFieldMapping(index, { champ_pdf: e.target.value })}
+                                    className="w-full text-sm border border-gray-300 rounded-md py-1 px-2"
+                                  />
+                                </div>
+                                <button
+                                  onClick={() => removeFieldMapping(index)}
+                                  className="text-red-500 hover:text-red-700 ml-2 p-1"
                                 >
-                                  <option value="joueur">Joueur</option>
-                                  <option value="educateur">Éducateur</option>
-                                  <option value="global">Global</option>
-                                  <option value="autre">Autre</option>
-                                </select>
+                                  <X size={16} />
+                                </button>
                               </div>
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">Mapping</label>
-                                <input
-                                  type="text"
-                                  value={field.mapping}
-                                  onChange={(e) => updateFieldMapping(index, { mapping: e.target.value })}
-                                  className="w-full text-sm border border-gray-300 rounded-md py-1 px-2"
-                                  placeholder="ex: joueur.nom"
-                                />
-                              </div>
-                            </div>
-                            {field.valeur_possible && field.valeur_possible.length > 0 && (
-                              <div className="mt-1">
-                                <label className="block text-xs text-gray-500 mb-1">Valeurs possibles</label>
-                                <div className="flex flex-wrap gap-1">
-                                  {field.valeur_possible.map((val, i) => (
-                                    <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-800">
-                                      {val}
-                                    </span>
-                                  ))}
+                              
+                              <div className="grid grid-cols-2 gap-4 mb-3">
+                                <div>
+                                  <label className="block text-xs text-gray-500 mb-1">Type de donnée</label>
+                                  <select
+                                    value={field.type}
+                                    onChange={(e) => updateFieldMapping(index, { type: e.target.value as any })}
+                                    className="w-full text-sm border border-gray-300 rounded-md py-1 px-2"
+                                  >
+                                    <option value="joueur">Joueur</option>
+                                    <option value="educateur">Éducateur</option>
+                                    <option value="global">Global</option>
+                                    <option value="autre">Autre</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-gray-500 mb-1">Correspondance</label>
+                                  <input
+                                    type="text"
+                                    value={field.mapping}
+                                    onChange={(e) => updateFieldMapping(index, { mapping: e.target.value })}
+                                    className="w-full text-sm border border-gray-300 rounded-md py-1 px-2"
+                                    placeholder="ex: joueur.nom"
+                                  />
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        ))}
+                              
+                              {field.valeur_possible && field.valeur_possible.length > 0 && (
+                                <div>
+                                  <label className="block text-xs text-gray-500 mb-1">Exemples de valeurs détectées par l'IA</label>
+                                  <div className="flex flex-wrap gap-1 p-2 bg-gray-100 rounded-md">
+                                    {field.valeur_possible.map((val, i) => (
+                                      <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">
+                                        {val}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Guide d'aide pour le mapping */}
+                              {field.type === 'joueur' && (
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <p className="font-medium">Mappings disponibles pour un joueur:</p>
+                                  <ul className="list-disc pl-4 mt-1 space-y-1">
+                                    <li>joueur.nom - Nom du joueur</li>
+                                    <li>joueur.prenom - Prénom du joueur</li>
+                                    <li>joueur.licence - Numéro de licence</li>
+                                    <li>joueur.est_avant - Peut jouer avant (oui/non)</li>
+                                    <li>joueur.est_arbitre - Peut arbitrer (oui/non)</li>
+                                  </ul>
+                                </div>
+                              )}
+                              
+                              {field.type === 'educateur' && (
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <p className="font-medium">Mappings disponibles pour un éducateur:</p>
+                                  <ul className="list-disc pl-4 mt-1 space-y-1">
+                                    <li>educateur.nom - Nom de l'éducateur</li>
+                                    <li>educateur.prenom - Prénom de l'éducateur</li>
+                                    <li>educateur.licence - Numéro de licence</li>
+                                    <li>educateur.diplome - Diplôme</li>
+                                    <li>educateur.est_referent - Est référent (oui/non)</li>
+                                  </ul>
+                                </div>
+                              )}
+                              
+                              {field.type === 'global' && (
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <p className="font-medium">Mappings disponibles pour les informations globales:</p>
+                                  <ul className="list-disc pl-4 mt-1 space-y-1">
+                                    <li>tournoi.nom - Nom du tournoi</li>
+                                    <li>tournoi.date - Date du tournoi</li>
+                                    <li>tournoi.lieu - Lieu du tournoi</li>
+                                    <li>tournoi.categorie - Catégorie</li>
+                                    <li>tournoi.club_organisateur - Club organisateur</li>
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
-                      <div className="flex justify-between">
+                      <div className="flex justify-between mt-4">
                         <button
                           type="button"
                           onClick={addFieldMapping}
-                          className="px-3 py-1 text-sm border border-gray-300 rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 flex items-center"
+                          className="px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 flex items-center"
                         >
                           <Plus size={14} className="mr-1" />
                           Ajouter un champ
@@ -787,7 +862,7 @@ const Templates: React.FC = () => {
                           onClick={() => {
                             setShowMappingEditor(false);
                           }}
-                          className="px-3 py-1 text-sm border border-transparent rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+                          className="px-3 py-2 text-sm border border-transparent rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
                         >
                           Confirmer le mapping
                         </button>
@@ -926,17 +1001,17 @@ const Templates: React.FC = () => {
                               {(ocrStatus === 'extracting' || ocrStatus === 'analyzing') ? (
                                 <>
                                   <Loader size={18} className="mr-2 animate-spin" />
-                                  {ocrStatus === 'extracting' ? 'Extraction du texte...' : 'Analyse des champs...'}
+                                  {ocrStatus === 'extracting' ? 'Extraction du texte...' : 'Analyse des champs avec IA...'}
                                 </>
                               ) : (
                                 <>
                                   <Scan size={18} className="mr-2" />
-                                  Analyser le PDF avec Mistral OCR
+                                  Analyser le PDF avec Mistral IA
                                 </>
                               )}
                             </button>
                             
-                            {/* Affichage du résultat de l'analyse - maintenant en-dessous des autres éléments */}
+                            {/* Affichage du résultat de l'analyse */}
                             {ocrStatus === 'success' && (
                               <div className="bg-green-50 p-2 rounded-md flex flex-wrap items-center justify-between">
                                 <div className="flex items-center">
@@ -954,7 +1029,7 @@ const Templates: React.FC = () => {
                                   className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center mt-1 sm:mt-0"
                                 >
                                   <Eye size={14} className="mr-1" />
-                                  Voir le mapping
+                                  Éditer le mapping
                                 </button>
                               </div>
                             )}
@@ -1021,6 +1096,46 @@ const Templates: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    
+                    {/* Résumé des champs analysés */}
+                    {formData.fieldMappings && formData.fieldMappings.length > 0 && (
+                      <div className="border border-indigo-100 bg-indigo-50 p-4 rounded-md">
+                        <h4 className="font-medium text-indigo-700 mb-2 flex items-center">
+                          <Scan size={16} className="mr-1" />
+                          Champs analysés par l'IA ({formData.fieldMappings.length})
+                        </h4>
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {formData.fieldMappings.filter(f => f.type === 'global').length > 0 && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 text-blue-800">
+                              {formData.fieldMappings.filter(f => f.type === 'global').length} champs globaux
+                            </span>
+                          )}
+                          {formData.fieldMappings.filter(f => f.type === 'joueur').length > 0 && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-800">
+                              {formData.fieldMappings.filter(f => f.type === 'joueur').length} champs joueurs
+                            </span>
+                          )}
+                          {formData.fieldMappings.filter(f => f.type === 'educateur').length > 0 && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-800">
+                              {formData.fieldMappings.filter(f => f.type === 'educateur').length} champs éducateurs
+                            </span>
+                          )}
+                          {formData.fieldMappings.filter(f => f.type === 'autre').length > 0 && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-800">
+                              {formData.fieldMappings.filter(f => f.type === 'autre').length} autres champs
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMappingEditor(true)}
+                          className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center"
+                        >
+                          <Edit size={14} className="mr-1" />
+                          Modifier le mapping
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-4 flex justify-end space-x-3">
