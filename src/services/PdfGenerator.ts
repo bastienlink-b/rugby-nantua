@@ -76,6 +76,8 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
     nom_manifestation: tournament.location,
     date_manifestation: new Date(tournament.date).toLocaleDateString('fr-FR'),
     lieu_manifestation: tournament.location,
+    categorie: 'M14', // Ideally this should come from the age category
+    club: 'US Nantua Rugby',
     joueurs: players.map(player => ({
       nom: player.lastName,
       prenom: player.firstName,
@@ -95,7 +97,27 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
   if (fields.length > 0) {
     // Si le PDF a des champs de formulaire, remplir ces champs
     console.log("PDF avec formulaire détecté, remplissage des champs...");
+    
+    // Afficher tous les noms de champs pour le débogage
+    console.log("Noms des champs de formulaire détectés:");
+    fields.forEach(field => {
+      console.log(`- ${field.getName()} (${field.constructor.name})`);
+    });
+    
     fillFormFields(form, data, template.fieldMappings || []);
+    
+    // Vérification post-remplissage
+    console.log("Vérification des champs après remplissage:");
+    fields.forEach(field => {
+      if (field.constructor.name === 'PDFTextField') {
+        try {
+          const value = form.getTextField(field.getName()).getText();
+          console.log(`- ${field.getName()}: "${value}"`);
+        } catch (e) {
+          console.warn(`Erreur lors de la lecture du champ ${field.getName()}:`, e);
+        }
+      }
+    });
   } else {
     console.log("Aucun champ de formulaire détecté, dessin du texte sur le PDF...");
     
@@ -115,7 +137,12 @@ export const generatePdf = async (options: GeneratePdfOptions): Promise<Uint8Arr
   }
 
   // Aplatir le formulaire pour rendre les champs remplis non modifiables
-  form.flatten();
+  try {
+    form.flatten();
+    console.log("Formulaire aplati avec succès");
+  } catch (e) {
+    console.warn("Erreur lors de l'aplatissement du formulaire:", e);
+  }
 
   // Enregistrement du PDF modifié
   return pdfDoc.save();
@@ -142,9 +169,16 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
         .filter(mapping => mapping.type === 'global')
         .forEach(mapping => {
           try {
+            console.log(`Traitement du mapping global: ${mapping.champ_pdf} -> ${mapping.mapping}`);
             const value = getValueFromMapping(mapping.mapping, data);
             if (value !== null && value !== undefined) {
+              console.log(`  Valeur trouvée: "${value}", tentative de remplissage du champ "${mapping.champ_pdf}"`);
               fillField(form, mapping.champ_pdf, value);
+              
+              // Essayez aussi des variantes communes du nom de champ
+              tryFillVariantFieldNames(form, mapping.champ_pdf, value);
+            } else {
+              console.log(`  Aucune valeur trouvée pour le mapping "${mapping.mapping}"`);
             }
           } catch (error) {
             console.warn(`Erreur lors du remplissage du champ ${mapping.champ_pdf}:`, error);
@@ -158,6 +192,7 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
           .forEach(mapping => {
             try {
               let value = null;
+              console.log(`Traitement du mapping joueur: ${mapping.champ_pdf} -> ${mapping.mapping} pour le joueur ${index+1}`);
               
               if (mapping.mapping.includes('nom')) value = joueur.nom;
               else if (mapping.mapping.includes('prenom')) value = joueur.prenom;
@@ -166,16 +201,26 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
               else if (mapping.mapping.includes('arbitre')) value = joueur.est_arbitre;
               
               if (value !== null && value !== undefined) {
-                // Utiliser la position du joueur pour construire le nom du champ
-                // Par exemple, si le champ est "joueurNom", utilisez "joueurNom1", "joueurNom2", etc.
-                const fieldName = `${mapping.champ_pdf}${index + 1}`;
-                fillField(form, fieldName, value);
+                // Remplacer [n] ou {n} ou n par l'index du joueur
+                const patterns = [
+                  { regex: /\[n\]/, replace: `[${index + 1}]` },
+                  { regex: /\{n\}/, replace: `{${index + 1}}` },
+                  { regex: /^(.*?)n$/, replace: `$1${index + 1}` },
+                  { regex: /^(.*?)n(.*)$/, replace: `$1${index + 1}$2` }
+                ];
                 
-                // Essayer aussi avec un format alternatif, par exemple "joueur[1].nom"
-                const altFieldName = mapping.champ_pdf.replace('[n]', `[${index + 1}]`);
-                if (altFieldName !== mapping.champ_pdf) {
-                  fillField(form, altFieldName, value);
+                for (const pattern of patterns) {
+                  const fieldName = mapping.champ_pdf.replace(pattern.regex, pattern.replace);
+                  if (fieldName !== mapping.champ_pdf) {
+                    console.log(`  Tentative avec le champ "${fieldName}" pour la valeur "${value}"`);
+                    fillField(form, fieldName, value);
+                  }
                 }
+                
+                // Essayer aussi un format avec numéro à la fin
+                const indexFieldName = `${mapping.champ_pdf}${index + 1}`;
+                console.log(`  Tentative avec le champ "${indexFieldName}" pour la valeur "${value}"`);
+                fillField(form, indexFieldName, value);
               }
             } catch (error) {
               console.warn(`Erreur lors du remplissage du champ joueur ${mapping.champ_pdf}:`, error);
@@ -190,6 +235,7 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
           .forEach(mapping => {
             try {
               let value = null;
+              console.log(`Traitement du mapping éducateur: ${mapping.champ_pdf} -> ${mapping.mapping} pour l'éducateur ${index+1}`);
               
               if (mapping.mapping.includes('nom')) value = educateur.nom;
               else if (mapping.mapping.includes('prenom')) value = educateur.prenom;
@@ -198,15 +244,26 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
               else if (mapping.mapping.includes('referent')) value = educateur.est_referent;
               
               if (value !== null && value !== undefined) {
-                // Utiliser la position de l'éducateur pour construire le nom du champ
-                const fieldName = `${mapping.champ_pdf}${index + 1}`;
-                fillField(form, fieldName, value);
+                // Remplacer [n] ou {n} ou n par l'index de l'éducateur
+                const patterns = [
+                  { regex: /\[n\]/, replace: `[${index + 1}]` },
+                  { regex: /\{n\}/, replace: `{${index + 1}}` },
+                  { regex: /^(.*?)n$/, replace: `$1${index + 1}` },
+                  { regex: /^(.*?)n(.*)$/, replace: `$1${index + 1}$2` }
+                ];
                 
-                // Essayer aussi avec un format alternatif
-                const altFieldName = mapping.champ_pdf.replace('[n]', `[${index + 1}]`);
-                if (altFieldName !== mapping.champ_pdf) {
-                  fillField(form, altFieldName, value);
+                for (const pattern of patterns) {
+                  const fieldName = mapping.champ_pdf.replace(pattern.regex, pattern.replace);
+                  if (fieldName !== mapping.champ_pdf) {
+                    console.log(`  Tentative avec le champ "${fieldName}" pour la valeur "${value}"`);
+                    fillField(form, fieldName, value);
+                  }
                 }
+                
+                // Essayer aussi un format avec numéro à la fin
+                const indexFieldName = `${mapping.champ_pdf}${index + 1}`;
+                console.log(`  Tentative avec le champ "${indexFieldName}" pour la valeur "${value}"`);
+                fillField(form, indexFieldName, value);
               }
             } catch (error) {
               console.warn(`Erreur lors du remplissage du champ éducateur ${mapping.champ_pdf}:`, error);
@@ -225,6 +282,38 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
 };
 
 /**
+ * Tente de remplir des variations du nom de champ avec la même valeur
+ */
+const tryFillVariantFieldNames = (form: PDFForm, baseFieldName: string, value: any) => {
+  // Liste des variantes communes de noms de champs
+  const variants = [
+    // Variations avec case différente
+    baseFieldName.toLowerCase(),
+    baseFieldName.toUpperCase(),
+    baseFieldName.charAt(0).toUpperCase() + baseFieldName.slice(1),
+    
+    // Variations avec underscore ou tiret
+    baseFieldName.replace(/\s+/g, '_'),
+    baseFieldName.replace(/\s+/g, '-'),
+    baseFieldName.replace(/_/g, ''),
+    baseFieldName.replace(/-/g, ''),
+    
+    // Variations avec préfixes/suffixes communs
+    `form_${baseFieldName}`,
+    `field_${baseFieldName}`,
+    `${baseFieldName}_field`,
+    `txt${baseFieldName}`
+  ];
+  
+  // Essayer de remplir chaque variante
+  variants.forEach(variant => {
+    if (variant !== baseFieldName) {
+      fillField(form, variant, value);
+    }
+  });
+};
+
+/**
  * Remplit un champ de formulaire avec une valeur donnée
  * @param form Formulaire PDF
  * @param fieldName Nom du champ
@@ -232,20 +321,20 @@ const fillFormFields = (form: PDFForm, data: PdfData, fieldMappings: PdfFieldMap
  */
 const fillField = (form: PDFForm, fieldName: string, value: any) => {
   try {
-    // Check if the field exists
+    // Vérifier si le champ existe
     const field = form.getFields().find(f => f.getName() === fieldName);
     if (!field) {
-      // console.warn(`Champ ${fieldName} non trouvé dans le formulaire`);
+      // Pas d'erreur log si le champ n'existe pas, c'est normal dans notre approche d'essayer différentes variations
       return;
     }
 
-    // Handle different field types
+    // Gérer différents types de champs
     if (field.constructor.name === 'PDFTextField') {
       const textValue = typeof value === 'boolean' 
         ? (value ? 'Oui' : 'Non')
         : String(value);
       form.getTextField(fieldName).setText(textValue);
-      console.log(`Champ texte ${fieldName} rempli avec: ${textValue}`);
+      console.log(`✓ Champ texte ${fieldName} rempli avec: "${textValue}"`);
     } else if (field.constructor.name === 'PDFCheckBox') {
       if (typeof value === 'boolean') {
         if (value) {
@@ -261,7 +350,7 @@ const fillField = (form: PDFForm, fieldName: string, value: any) => {
           form.getCheckBox(fieldName).uncheck();
         }
       }
-      console.log(`Case à cocher ${fieldName} définie à: ${!!value}`);
+      console.log(`✓ Case à cocher ${fieldName} définie à: ${!!value}`);
     } else if (field.constructor.name === 'PDFDropdown') {
       const dropdownField = form.getDropdown(fieldName);
       const options = dropdownField.getOptions();
@@ -269,8 +358,28 @@ const fillField = (form: PDFForm, fieldName: string, value: any) => {
       
       if (options.includes(stringValue)) {
         dropdownField.select(stringValue);
+        console.log(`✓ Liste déroulante ${fieldName} définie à: "${stringValue}"`);
       } else {
-        console.warn(`Valeur ${value} non trouvée dans les options de la liste déroulante ${fieldName}`);
+        console.warn(`Valeur "${value}" non trouvée dans les options de la liste déroulante ${fieldName}`);
+      }
+    } else if (field.constructor.name === 'PDFRadioGroup') {
+      try {
+        const radioGroup = form.getRadioGroup(fieldName);
+        const options = radioGroup.getOptions();
+        const stringValue = String(value);
+        
+        if (options.includes(stringValue)) {
+          radioGroup.select(stringValue);
+          console.log(`✓ Groupe radio ${fieldName} défini à: "${stringValue}"`);
+        } else if (typeof value === 'boolean' && value === true) {
+          // Si c'est un booléen true, sélectionnez la première option
+          if (options.length > 0) {
+            radioGroup.select(options[0]);
+            console.log(`✓ Groupe radio ${fieldName} défini à la première option: "${options[0]}"`);
+          }
+        }
+      } catch (e) {
+        console.warn(`Erreur avec le groupe radio ${fieldName}:`, e);
       }
     } else {
       console.warn(`Type de champ non supporté pour ${fieldName}: ${field.constructor.name}`);
@@ -287,49 +396,155 @@ const fillField = (form: PDFForm, fieldName: string, value: any) => {
  */
 const autoFillFormFields = (form: PDFForm, data: PdfData) => {
   const fields = form.getFields();
+  console.log("Tentative de remplissage automatique avec les données suivantes:", data);
   
-  // Map of common field names to their values
-  const commonFieldMappings: Record<string, any> = {
-    // Event details
-    'tournoi': data.nom_manifestation,
-    'manifestation': data.nom_manifestation,
-    'evenement': data.nom_manifestation,
-    'date': data.date_manifestation,
-    'lieu': data.lieu_manifestation,
-    'location': data.lieu_manifestation,
+  // Tableau de correspondances entre les noms de champs communs et leurs valeurs
+  const fieldMappings: Record<string, any[]> = {
+    // Informations sur le tournoi
+    'tournoi': [data.nom_manifestation, ['nom', 'tournoi', 'tournament', 'evenement', 'event']],
+    'manifestation': [data.nom_manifestation, ['nom', 'manifestation']],
+    'evenement': [data.nom_manifestation, ['nom', 'evenement', 'event']],
+    'date': [data.date_manifestation, ['date', 'jour', 'day']],
+    'lieu': [data.lieu_manifestation, ['lieu', 'location', 'place', 'site']],
     
-    // Tournament details
-    'club': data.club,
-    'categorie': data.categorie,
-    'category': data.categorie,
+    // Informations sur le club
+    'club': [data.club, ['club', 'equipe', 'team']],
+    'categorie': [data.categorie, ['categorie', 'category', 'age', 'classe']],
+    
+    // Référent
+    'referent': [data.educateurs.find(e => e.est_referent)?.nom, ['responsable', 'referent', 'principal']],
   };
   
-  // Try to fill in fields based on their names
+  // Essayer de remplir tous les champs en fonction des correspondances
   fields.forEach(field => {
-    const fieldName = field.getName();
-    const lowerFieldName = fieldName.toLowerCase();
+    const fieldName = field.getName().toLowerCase();
     
-    // Check for direct matches in our mapping
-    for (const [key, value] of Object.entries(commonFieldMappings)) {
-      if (value && (lowerFieldName === key || lowerFieldName.includes(key))) {
-        try {
-          fillField(form, fieldName, value);
-        } catch (error) {
-          console.warn(`Erreur lors du remplissage automatique du champ ${fieldName}:`, error);
+    // Parcourir toutes les correspondances possibles
+    Object.entries(fieldMappings).forEach(([key, [value, keywords]]) => {
+      if (value) {
+        // Vérifier si le nom du champ contient l'un des mots-clés
+        if (keywords.some(keyword => fieldName.includes(keyword))) {
+          try {
+            fillField(form, field.getName(), value);
+          } catch (error) {
+            console.warn(`Erreur lors du remplissage automatique du champ ${fieldName}:`, error);
+          }
         }
       }
-    }
+    });
     
-    // Check for players
-    if (lowerFieldName.includes('joueur') || lowerFieldName.includes('player')) {
+    // Traitement spécial pour les joueurs
+    if (fieldName.includes('joueur') || fieldName.includes('player')) {
       tryFillPlayerField(form, field, data.joueurs);
     }
     
-    // Check for coaches
-    if (lowerFieldName.includes('educateur') || 
-        lowerFieldName.includes('entraineur') || 
-        lowerFieldName.includes('coach')) {
+    // Traitement spécial pour les entraîneurs
+    if (fieldName.includes('educateur') || 
+        fieldName.includes('entraineur') || 
+        fieldName.includes('coach')) {
       tryFillCoachField(form, field, data.educateurs);
+    }
+  });
+  
+  // Essai agressif de remplissage de champs par position numérique
+  tryNumericPositionFill(form, data);
+};
+
+/**
+ * Essaie de remplir les champs en fonction de leur position numérique
+ * Par exemple: champ1, champ2, etc.
+ */
+const tryNumericPositionFill = (form: PDFForm, data: PdfData) => {
+  const fields = form.getFields();
+  const fieldNames = fields.map(f => f.getName());
+  
+  // Recherche des patterns de noms de champs numériques
+  const patterns = [
+    /^(.+?)(\d+)$/, // Forme: "champ1", "champ2", etc.
+    /^(.+?)\[(\d+)\]$/, // Forme: "champ[1]", "champ[2]", etc.
+    /^(.+?)_(\d+)$/ // Forme: "champ_1", "champ_2", etc.
+  ];
+  
+  // Grouper les champs par préfixe et numéro
+  const groupedFields: Record<string, Record<string, string>> = {};
+  
+  fieldNames.forEach(name => {
+    for (const pattern of patterns) {
+      const match = name.match(pattern);
+      if (match) {
+        const [_, prefix, indexStr] = match;
+        const index = parseInt(indexStr, 10);
+        
+        if (!groupedFields[prefix]) {
+          groupedFields[prefix] = {};
+        }
+        
+        groupedFields[prefix][index] = name;
+        break;
+      }
+    }
+  });
+  
+  // Remplir les champs par groupes
+  Object.entries(groupedFields).forEach(([prefix, indexedFields]) => {
+    const lowerPrefix = prefix.toLowerCase();
+    
+    // Détecter le type de données par le préfixe
+    const isPlayerName = lowerPrefix.includes('joueur') || 
+                         lowerPrefix.includes('player') || 
+                         lowerPrefix.includes('nom');
+                         
+    const isPlayerFirstName = lowerPrefix.includes('prenom') || lowerPrefix.includes('firstname');
+    
+    const isLicense = lowerPrefix.includes('licence') || 
+                      lowerPrefix.includes('license') || 
+                      lowerPrefix.includes('numero');
+    
+    const isCoach = lowerPrefix.includes('educateur') || 
+                    lowerPrefix.includes('entraineur') || 
+                    lowerPrefix.includes('coach');
+    
+    // Remplir selon le type détecté
+    if (isPlayerName) {
+      Object.entries(indexedFields).forEach(([indexStr, fieldName]) => {
+        const index = parseInt(indexStr, 10) - 1;
+        if (index >= 0 && index < data.joueurs.length) {
+          fillField(form, fieldName, data.joueurs[index].nom);
+        }
+      });
+    } else if (isPlayerFirstName) {
+      Object.entries(indexedFields).forEach(([indexStr, fieldName]) => {
+        const index = parseInt(indexStr, 10) - 1;
+        if (index >= 0 && index < data.joueurs.length) {
+          fillField(form, fieldName, data.joueurs[index].prenom);
+        }
+      });
+    } else if (isLicense) {
+      Object.entries(indexedFields).forEach(([indexStr, fieldName]) => {
+        const index = parseInt(indexStr, 10) - 1;
+        if (index >= 0 && index < data.joueurs.length) {
+          fillField(form, fieldName, data.joueurs[index].licence);
+        }
+      });
+    } else if (isCoach) {
+      Object.entries(indexedFields).forEach(([indexStr, fieldName]) => {
+        const index = parseInt(indexStr, 10) - 1;
+        if (index >= 0 && index < data.educateurs.length) {
+          // Déterminer quelle information de l'éducateur utiliser
+          if (lowerPrefix.includes('nom')) {
+            fillField(form, fieldName, data.educateurs[index].nom);
+          } else if (lowerPrefix.includes('prenom')) {
+            fillField(form, fieldName, data.educateurs[index].prenom);
+          } else if (lowerPrefix.includes('licence')) {
+            fillField(form, fieldName, data.educateurs[index].licence);
+          } else if (lowerPrefix.includes('diplome')) {
+            fillField(form, fieldName, data.educateurs[index].diplome);
+          } else {
+            // Par défaut, utiliser le nom complet
+            fillField(form, fieldName, `${data.educateurs[index].prenom} ${data.educateurs[index].nom}`);
+          }
+        }
+      });
     }
   });
 };
@@ -340,15 +555,15 @@ const autoFillFormFields = (form: PDFForm, data: PdfData) => {
 const tryFillPlayerField = (form: PDFForm, field: PDFField, players: PdfData['joueurs']) => {
   const fieldName = field.getName().toLowerCase();
   
-  // Extract player index from field name if present
+  // Extraire l'index du joueur du nom du champ s'il est présent
   const indexMatch = fieldName.match(/(\d+)/);
   const playerIndex = indexMatch ? parseInt(indexMatch[1], 10) - 1 : -1;
   
-  // If we have a specific player index and it exists in our data
+  // Si nous avons un index spécifique et qu'il existe dans nos données
   if (playerIndex >= 0 && playerIndex < players.length) {
     const player = players[playerIndex];
     
-    // Determine what type of player data this field contains
+    // Déterminer quel type de données de joueur ce champ contient
     if (fieldName.includes('nom')) {
       fillField(form, field.getName(), player.nom);
     } else if (fieldName.includes('prenom')) {
@@ -359,15 +574,23 @@ const tryFillPlayerField = (form: PDFForm, field: PDFField, players: PdfData['jo
       fillField(form, field.getName(), player.est_avant);
     } else if (fieldName.includes('arbitre')) {
       fillField(form, field.getName(), player.est_arbitre);
+    } else if (fieldName.match(/joueur\d+|player\d+/)) {
+      // Lorsque nous avons un nom du type "joueur1" sans autre précision, utiliser le nom complet
+      fillField(form, field.getName(), `${player.prenom} ${player.nom}`);
     }
   }
-  // If no specific index but it's a multi-player field
+  // Si pas d'index spécifique mais c'est un champ pour plusieurs joueurs
   else if (playerIndex === -1) {
-    // It could be a field for multiple players (less common)
+    // Ça pourrait être un champ pour plusieurs joueurs (moins courant)
     if (field instanceof PDFTextField) {
       if (fieldName.includes('joueurs') || fieldName.includes('players')) {
         const playerText = players.map(p => `${p.nom} ${p.prenom}`).join('\n');
         fillField(form, field.getName(), playerText);
+      } else if (fieldName.match(/^joueur$|^player$/i)) {
+        // S'il y a juste "joueur" ou "player", essayer avec le premier joueur
+        if (players.length > 0) {
+          fillField(form, field.getName(), `${players[0].prenom} ${players[0].nom}`);
+        }
       }
     }
   }
@@ -379,15 +602,15 @@ const tryFillPlayerField = (form: PDFForm, field: PDFField, players: PdfData['jo
 const tryFillCoachField = (form: PDFForm, field: PDFField, coaches: PdfData['educateurs']) => {
   const fieldName = field.getName().toLowerCase();
   
-  // Extract coach index from field name if present
+  // Extraire l'index de l'entraîneur du nom du champ s'il est présent
   const indexMatch = fieldName.match(/(\d+)/);
   const coachIndex = indexMatch ? parseInt(indexMatch[1], 10) - 1 : -1;
   
-  // If we have a specific coach index and it exists in our data
+  // Si nous avons un index spécifique et qu'il existe dans nos données
   if (coachIndex >= 0 && coachIndex < coaches.length) {
     const coach = coaches[coachIndex];
     
-    // Determine what type of coach data this field contains
+    // Déterminer quel type de données d'entraîneur ce champ contient
     if (fieldName.includes('nom')) {
       fillField(form, field.getName(), coach.nom);
     } else if (fieldName.includes('prenom')) {
@@ -398,22 +621,33 @@ const tryFillCoachField = (form: PDFForm, field: PDFField, coaches: PdfData['edu
       fillField(form, field.getName(), coach.diplome);
     } else if (fieldName.includes('referent')) {
       fillField(form, field.getName(), coach.est_referent);
+    } else if (fieldName.match(/educateur\d+|coach\d+|entraineur\d+/)) {
+      // Lorsque nous avons un nom du type "educateur1" sans autre précision, utiliser le nom complet
+      fillField(form, field.getName(), `${coach.prenom} ${coach.nom}`);
     }
   }
-  // If no specific index but it's a multi-coach field
-  else if (coachIndex === -1) {
-    // It could be a field for multiple coaches (less common)
-    if (field instanceof PDFTextField) {
-      if (fieldName.includes('educateurs') || fieldName.includes('coaches')) {
-        const coachText = coaches.map(c => `${c.nom} ${c.prenom}`).join('\n');
-        fillField(form, field.getName(), coachText);
+  // Si pas d'index spécifique mais c'est un champ pour un référent
+  else if (fieldName.includes('referent') || fieldName.includes('responsable')) {
+    const referentCoach = coaches.find(c => c.est_referent);
+    if (referentCoach) {
+      if (field instanceof PDFTextField) {
+        fillField(form, field.getName(), `${referentCoach.prenom} ${referentCoach.nom}`);
+      } else {
+        fillField(form, field.getName(), true);
       }
-      
-      // Special case for the referent coach
-      if (fieldName.includes('referent')) {
-        const referentCoach = coaches.find(c => c.est_referent);
-        if (referentCoach) {
-          fillField(form, field.getName(), `${referentCoach.nom} ${referentCoach.prenom}`);
+    }
+  }
+  // Si pas d'index spécifique mais c'est un champ pour plusieurs entraîneurs
+  else if (coachIndex === -1) {
+    // Ça pourrait être un champ pour plusieurs entraîneurs (moins courant)
+    if (field instanceof PDFTextField) {
+      if (fieldName.includes('educateurs') || fieldName.includes('entraineurs') || fieldName.includes('coaches')) {
+        const coachText = coaches.map(c => `${c.prenom} ${c.nom}`).join('\n');
+        fillField(form, field.getName(), coachText);
+      } else if (fieldName.match(/^educateur$|^entraineur$|^coach$/i)) {
+        // S'il y a juste "educateur", essayer avec le premier entraîneur
+        if (coaches.length > 0) {
+          fillField(form, field.getName(), `${coaches[0].prenom} ${coaches[0].nom}`);
         }
       }
     }
@@ -549,28 +783,97 @@ const applyFieldMappings = (
 const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
   // Écriture des informations générales
   if (data.nom_manifestation) {
-    page.drawText(data.nom_manifestation, {
-      x: 85,
+    page.drawText(`Tournoi: ${data.nom_manifestation}`, {
+      x: 50,
       y: 750,
-      size: 12,
+      size: 14,
       font,
       color: rgb(0, 0, 0)
     });
   }
   
   if (data.date_manifestation) {
-    page.drawText(data.date_manifestation, {
-      x: 85,
+    page.drawText(`Date: ${data.date_manifestation}`, {
+      x: 50,
       y: 730,
-      size: 10,
+      size: 12,
       font,
       color: rgb(0, 0, 0)
     });
   }
   
+  if (data.lieu_manifestation) {
+    page.drawText(`Lieu: ${data.lieu_manifestation}`, {
+      x: 50,
+      y: 710,
+      size: 12,
+      font,
+      color: rgb(0, 0, 0)
+    });
+  }
+  
+  if (data.club) {
+    page.drawText(`Club: ${data.club}`, {
+      x: 50,
+      y: 690,
+      size: 12,
+      font,
+      color: rgb(0, 0, 0)
+    });
+  }
+  
+  // En-têtes de la liste des joueurs
+  page.drawText("LISTE DES JOUEURS", {
+    x: 50,
+    y: 670,
+    size: 12,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Nom", {
+    x: 50,
+    y: 650,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Prénom", {
+    x: 150,
+    y: 650,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Licence", {
+    x: 250,
+    y: 650,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Avant", {
+    x: 350,
+    y: 650,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Arbitre", {
+    x: 400,
+    y: 650,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
   // Liste des joueurs
   data.joueurs.forEach((joueur, i) => {
-    const y = 650 - (i * 20); // Espacement de 20 points entre les joueurs
+    const y = 630 - (i * 20); // Espacement de 20 points entre les joueurs
     
     // Nom du joueur
     page.drawText(joueur.nom, {
@@ -601,7 +904,7 @@ const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
     
     // Indications pour les avants et arbitres
     if (joueur.est_avant) {
-      page.drawText('A', {
+      page.drawText('✓', {
         x: 350,
         y,
         size: 10,
@@ -611,8 +914,8 @@ const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
     }
     
     if (joueur.est_arbitre) {
-      page.drawText('AR', {
-        x: 370,
+      page.drawText('✓', {
+        x: 400,
         y,
         size: 10,
         font,
@@ -622,18 +925,59 @@ const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
   });
   
   // Liste des éducateurs
-  const educateurStartY = 650 - (data.joueurs.length * 20) - 40; // Espace après les joueurs
+  const educateurStartY = Math.max(630 - (data.joueurs.length * 20) - 40, 250); // Espace après les joueurs
   
-  page.drawText('Éducateurs:', {
+  page.drawText('ÉDUCATEURS:', {
     x: 50,
-    y: educateurStartY + 20,
+    y: educateurStartY,
     size: 12,
     font,
     color: rgb(0, 0, 0)
   });
   
+  // En-têtes de la liste des éducateurs
+  page.drawText("Nom", {
+    x: 50,
+    y: educateurStartY - 20,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Prénom", {
+    x: 150,
+    y: educateurStartY - 20,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Licence", {
+    x: 250,
+    y: educateurStartY - 20,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Diplôme", {
+    x: 320,
+    y: educateurStartY - 20,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
+  page.drawText("Référent", {
+    x: 400,
+    y: educateurStartY - 20,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0)
+  });
+  
   data.educateurs.forEach((educateur, i) => {
-    const y = educateurStartY - (i * 20);
+    const y = educateurStartY - 40 - (i * 20);
     
     // Nom de l'éducateur
     page.drawText(educateur.nom, {
@@ -662,10 +1006,19 @@ const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
       color: rgb(0, 0, 0)
     });
     
+    // Diplôme
+    page.drawText(educateur.diplome || '', {
+      x: 320,
+      y,
+      size: 10,
+      font,
+      color: rgb(0, 0, 0)
+    });
+    
     // Indication pour l'éducateur référent
     if (educateur.est_referent) {
-      page.drawText('Référent', {
-        x: 350,
+      page.drawText('✓', {
+        x: 400,
         y,
         size: 10,
         font,
@@ -682,13 +1035,41 @@ const applyDefaultPositions = (page: PDFPage, font: PDFFont, data: PdfData) => {
  * @returns Valeur correspondant au mapping
  */
 const getValueFromMapping = (mapping: string, data: any): any => {
-  // Exemple de mise en œuvre simple pour les cas de base
-  if (mapping === 'tournoi.lieu') return data.lieu_manifestation;
+  console.log(`Recherche de valeur pour le mapping: ${mapping}`);
+  
+  // Mappings de base pour les champs globaux
+  if (mapping === 'tournoi.lieu' || mapping === 'tournoi.location') return data.lieu_manifestation;
   if (mapping === 'tournoi.date') return data.date_manifestation;
   if (mapping === 'tournoi.club_organisateur' || mapping === 'tournoi.nom') return data.nom_manifestation;
+  if (mapping === 'club') return data.club;
+  if (mapping === 'categorie' || mapping === 'category') return data.categorie;
   
-  // Pour les mappings plus complexes, un traitement plus sophistiqué serait nécessaire
-  return null;
+  // Pour un référent, retourner le nom complet
+  if (mapping === 'educateur.referent' || mapping === 'coach.referent') {
+    const referent = data.educateurs.find(e => e.est_referent);
+    return referent ? `${referent.prenom} ${referent.nom}` : null;
+  }
+  
+  // Mappings pour des chemins d'accès imbriqués avec notation par points
+  const keys = mapping.split('.');
+  let value = data;
+  
+  for (const key of keys) {
+    if (value === undefined || value === null) return null;
+    
+    // Cas spécial pour "joueurs" et "educateurs"
+    if (key === 'joueurs' && Array.isArray(data.joueurs) && data.joueurs.length > 0) {
+      return data.joueurs;
+    }
+    
+    if (key === 'educateurs' && Array.isArray(data.educateurs) && data.educateurs.length > 0) {
+      return data.educateurs;
+    }
+    
+    value = value[key];
+  }
+  
+  return value;
 };
 
 /**
